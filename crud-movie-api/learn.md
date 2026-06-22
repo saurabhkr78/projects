@@ -452,3 +452,199 @@ r.TLS
 ```
 
 Non-nil if HTTPS.
+
+# how json/encoding works
+
+it has marshal function
+
+```go
+json.Marshal(data)
+```
+
+then sent backt he encoded data to response writer
+
+```go
+w.Write(data)
+```
+
+so the shortcut for this is
+
+```go
+json.NewEncoder(w).Encode(data)
+```
+
+in production while returning the data client need to know which type of data they are receiving. that what header tells
+
+Headers must be sent before the response body.
+
+```go
+w.Header().Set(
+	"Content-Type",
+	"application/json",
+)
+```
+
+The client may guess:
+
+```text
+type/subtype
+text/plain
+application/octet-stream
+unknown
+application/xml
+application/pdf
+image/png
+```
+
+Different clients may behave differently.
+
+# var Movie []movie
+Movie is a variable that holds a slice of movie structs.
+
+1.Static seed data
+
+var movies = []Movie{
+	...
+}
+
+2.Runtime additions
+
+movies = append(movies, newMovie)
+
+Rule of thumb:
+Known upfront?      → initialize slice literal.
+Added later?        → append().
+
+A slice literal is simply a way to create and initialize a slice in one step.
+var numbers = []int{1, 2, 3, 4, 5}
+
+
+# why not to start server first
+
+If you start the server first, `ListenAndServe()` is a blocking function.
+
+It opens the port, starts accepting requests, and then waits indefinitely for incoming requests.
+
+Since it blocks the current goroutine, execution never goes beyond that line until the server stops or returns an error.
+
+As a result, any code written after `ListenAndServe()` will never execute while the server is running.
+
+For example, if route registration, database initialization, or movie data creation happens after `ListenAndServe()`, that code will never run.
+
+Therefore, all application setup should happen before starting the server:
+here,
+1. Initialize data/database
+2. Create router
+3. Register routes/handlers
+4. Start server using `ListenAndServe()`
+
+# A common startup sequence is:
+
+1. Load configuration
+2. Connect to database
+3. Initialize repositories/services
+4. Create router
+5. Register routes
+6. Start server
+
+# Meaning of the name “iota” and use of assigning id to movies
+“a very small amount”
+movie.ID = strconv.Itoa(rand.Intn(1000000))
+
+# Better alternatives
+Option 1: UUID 
+import "github.com/google/uuid"
+
+movie.ID = uuid.New().String()
+
+Example:
+
+"550e8400-e29b-41d4-a716-446655440000"
+
+Option 2: Database auto-increment
+
+SQL:
+
+id SERIAL PRIMARY KEY
+
+Database generates:
+
+1, 2, 3, 4...
+
+
+Option 3: Counter (simple in-memory)
+var counter int
+
+movie.ID = strconv.Itoa(counter)
+counter++
+
+# how in prodcution crete response is returned
+1. return the new movie created in the response for confirmation,id,stored values
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(movie); err != nil {
+		http.Error(w, "failed to encode response", http.StatusInternalServerError)
+	}
+1.2  There are slight variations in production depends on payload size and urgency to see the created object
+1. return full object { created movie }
+2. minimal response 
+{
+  "message": "movie created"
+}
+
+# * string means
+suppose json sends {} and go result " " .
+
+Now you cannot tell:
+Did client send empty string ""?
+OR
+Did client not send FirstName at all? both becomes "".
+
+
+pointer can be nil but other data types cannot be
+
+
+| Situation           | Value              |
+| ------------------- | ------------------ |
+| client sends name   | pointer with value |
+| client doesn’t send | nil                |
+
+*string is a pointer to a string, used in APIs to distinguish between “field not provided” (nil) and “field provided with a value”.
+* string field points to either address if input provided else to nil.
+when you make *string Now you can distinguish:
+| Situation      | Value              |
+| -------------- | ------------------ |
+| not provided   | nil                |
+| provided empty | pointer to ""      |
+| provided value | pointer to "Nolan" |
+
+
+# ... is called the variadic expansion operator. 
+“Take this slice and pass its elements one by one to the function.”
+without(...)
+append(a,b) means append b(single value not slice) into a
+
+with(...) append ALL elements inside slice b individually
+
+
+# Game of [:]
+s[:]   - all elements (entire slice)
+
+s[a:b] - elements from index a to b-1
+
+s[:i]  - everything BEFORE i (0 to i-1)
+
+s[i:]  - everything FROM i to end
+
+s[i:j] - elements from i to j-1
+
+s[:len(s)] - entire slice (explicit form)
+
+s[len(s):] - empty slice
+
+s[:i] + s[i+1:]         - remove element at index i
+
+s[i:i]                  - empty slice at position i
+
+append(s[:i], x)        - insert x at index i (basic idea)
+
+s[:]                    - full slice copy view (shares memory)
