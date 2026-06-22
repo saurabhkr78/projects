@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Go Server Form</title>
+</head>
+<body>
+
+    <h2>Submit Your Information</h2>
+
+    <form action="/form" method="post">
+
+        <label for="name">Name</label>
+        <input
+            id="name"
+            type="text"
+            name="name"
+            placeholder="Enter your name"
+            required
+        >
+        <br><br>
+
+        <label for="email">Email</label>
+        <input
+            id="email"
+            type="email"
+            name="email"
+            placeholder="Enter your email"
+            required
+        >
+        <br><br>
+
+        <input type="submit" value="Submit">
+
+    </form>
+
+</body>
+</html>
