@@ -648,3 +648,5 @@ s[i:i]                  - empty slice at position i
 append(s[:i], x)        - insert x at index i (basic idea)
 
 s[:]                    - full slice copy view (shares memory)
+
+# {} this is called place holder

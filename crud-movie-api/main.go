@@ -1,4 +1,4 @@
-package crudmovieapi
+package main
 
 import (
 	"encoding/json"
@@ -51,19 +51,26 @@ func getMovie(w http.ResponseWriter, r *http.Request) {
 }
 func createMovie(w http.ResponseWriter, r *http.Request) {
 	//create a new movie variable where the data just read from the request body will be stored
-	var movie movie
-	if err := json.NewDecoder(r.Body).Decode(&movie); err != nil {
+	var newMovie movie
+	if err := json.NewDecoder(r.Body).Decode(&newMovie); err != nil {
 		http.Error(w, "failed to decode req body", http.StatusBadRequest)
 		return
 	}
+	// duplicate check
+	for _, m := range Movie {
+		if m.Title == newMovie.Title && m.Year == newMovie.Year {
+			http.Error(w, "movie already exists", http.StatusConflict)
+			return
+		}
+	}
 	//generate a random id for the movie
-	movie.ID = new(string)
-	*movie.ID = strconv.Itoa(rand.Intn(1000000))
+	newMovie.ID = new(string)
+	*newMovie.ID = strconv.Itoa(rand.Intn(1000000))
 	//append the new movie to the database
-	Movie = append(Movie, movie)
+	Movie = append(Movie, newMovie)
 	//return the new movie created in the response
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(movie); err != nil {
+	if err := json.NewEncoder(w).Encode(newMovie); err != nil {
 		http.Error(w, "failed to encode response", http.StatusInternalServerError)
 	}
 
