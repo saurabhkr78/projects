@@ -818,3 +818,19 @@ Allow maximum HTTP headers of
 1,048,576 bytes
 
 ≈ 1 MB
+
+
+# Why not simply write
+MaxHeaderBytes: 1048576
+
+You could.
+
+But
+
+1 << 20
+
+immediately tells every Go developer:
+
+"This is 1 MB."
+
+It's more expressive than a large numeric literal.
