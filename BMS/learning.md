@@ -760,3 +760,61 @@ func main() {
 		Handler: r, //"Whenever a request comes in, who should handle it?"
 		//MaxHeaderBytes:    1 << 20, //1 << 20 is 1 megabyte. This is the maximum size of request headers your server will accept.If someone sends 500 MB headers the server rejects them Protects against attacks.
 	}
+
+
+# Every left shift multiplies by 2.
+1 << n = 2ⁿ
+
+Therefore
+1 << 20
+
+means
+
+2²⁰
+
+which equals
+
+1,048,576
+Why is this used for memory?
+
+Computers measure memory in powers of 2.
+
+1024 bytes = 1 KB
+
+1024 KB = 1 MB
+
+Since
+
+1024 = 2¹⁰
+
+then
+
+1 MB
+
+=
+
+1024 × 1024
+
+=
+
+2¹⁰ × 2¹⁰
+
+=
+
+2²⁰
+
+which is
+
+1 << 20
+
+So
+
+MaxHeaderBytes: 1 << 20,
+
+means
+
+Allow maximum HTTP headers of
+
+1,048,576 bytes
+
+≈ 1 MB
