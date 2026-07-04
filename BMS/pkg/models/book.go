@@ -3,7 +3,6 @@ package models
 import (
 	"BMS/pkg/configs"
 	"github.com/jinzhu/gorm"
-	"log"
 )
 
 type Book struct {
@@ -28,25 +27,34 @@ func init() {
 }
 
 // create a new book in the database
-func CreateBook(book *Book) *Book {
-	db.NewRecord(book)
-	db.Create(book)
-	return book
+func CreateBook(book *Book) (*Book, error) {
+	result := db.Create(book)
+	if result.Error != nil {
+		return nil, result.Error
+	}
+
+	return book, nil
 }
 func GetAllBooks() []Book {
 	var Books []Book
 	db.Find(&Books) //SELECT * FROM books;
 	return Books
 }
-func DeleteBookByID(id int64) error {
+func DeleteBookByID(id uint) error {
 	var book Book
 
-	result := db.Where("id = ?", id).Delete(&book)
+	// Check if the book exists.
+	result := db.First(&book, id)
 	if result.Error != nil {
 		return result.Error
 	}
 
-	log.Println("Book deleted successfully")
+	// Delete the book.
+	result = db.Delete(&book)
+	if result.Error != nil {
+		return result.Error
+	}
+
 	return nil
 }
 func FindBookByID(id uint) (*Book, error) {
@@ -59,25 +67,26 @@ func FindBookByID(id uint) (*Book, error) {
 
 	return &book, nil
 }
-func UpdateBookByID(id uint, book *Book) *Book {
+func UpdateBookByID(id uint, book *Book) (*Book, error) {
 	var existingBook Book
 
+	// Find the existing book.
 	result := db.First(&existingBook, id)
 	if result.Error != nil {
-		log.Println("Error finding book:", result.Error)
-		return nil
+		return nil, result.Error
 	}
 
+	// Update the fields.
 	existingBook.Name = book.Name
 	existingBook.Author = book.Author
 	existingBook.Publication = book.Publication
 	existingBook.Price = book.Price
 
+	// Save the updated book.
 	result = db.Save(&existingBook)
 	if result.Error != nil {
-		log.Println("Error updating book:", result.Error)
-		return nil
+		return nil, result.Error
 	}
 
-	return &existingBook
+	return &existingBook, nil
 }
