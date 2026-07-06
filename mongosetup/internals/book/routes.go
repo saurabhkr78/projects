@@ -3,7 +3,6 @@ package book
 
 import (
 	"github.com/gorilla/mux"
-	"net/http"
 )
 
 /*
@@ -23,6 +22,7 @@ Router (Receptionist)
 func RegisterRoutes(r *mux.Router, h *Handler) {
 	bookRouter := r.PathPrefix("/books").Subrouter()
 
+	//register the routes and their corresponding handlers
 	bookRouter.HandleFunc("", h.CreateBook).Methods("POST")
 	bookRouter.HandleFunc("", h.GetBooks).Methods("GET")
 	bookRouter.HandleFunc("/{id}", h.GetBookByID).Methods("GET")

@@ -435,3 +435,398 @@ Method parameter.
 book:Parameter name.
 *Book: parameter type
 The caller of this merhod must provide a pointer to a Book.
+
+
+# to write main.go file
+Build from the bottom
+
+Always ask:
+
+What does this object need?
+
+Repository needs
+
+Collection
+
+Service needs
+
+Repository
+
+Handler needs
+
+Service
+
+Router needs
+
+Handler
+
+Server needs
+
+Router
+
+So the order becomes
+
+Mongo Client
+
+↓
+
+Database
+
+↓
+
+Collection
+
+↓
+
+Repository
+
+↓
+
+Service
+
+↓
+
+Handler
+
+↓
+
+Router
+
+↓
+
+HTTP Server
+
+That order almost writes main.go for you.
+
+# env varibales are stored at os level so written in caps to differentiate them with other varibles
+os.Getenv("port")
+
+# this is the hierarchy in mongo
+Hierarchy:
+
+Mongo Client: is root obj
+
+↓
+
+Database
+
+↓
+
+Collection
+
+↓
+
+Documents
+
+
+# In real production code, you'll often see service and repository methods accept a context.Context parameter:
+
+func (s *Service) CreateBook(ctx context.Context, book *Book) (*Book, error)
+
+and
+
+func (r *Repository) CreateBook(ctx context.Context, book *Book) (*Book, error)
+
+# What does ctx contain?
+1.1. Deadline
+2. Cancellation signal
+3. values
+3. Values
+
+Example:
+
+User ID
+
+Trace ID
+
+Request ID
+
+Authentication data
+It contains information about the request
+
+note: The same context travels through every layer.
+
+
+# Why is context.Background() used in Connect()?
+
+When connecting at application startup, there is no HTTP request.
+
+So you create a fresh root context:
+
+context.Background()
+
+and add a timeout:
+
+context.WithTimeout(...)
+During an HTTP request
+
+Later, inside a handler, you won't create a new background context.
+
+Instead you'll use:
+
+ctx := r.Context()
+
+because the request already has one.
+
+Example:
+
+func (h *Handler) GetBooks(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	books, err := h.service.GetBooks(ctx)
+}
+
+Now if the client closes the browser, the request context is canceled automatically, and that cancellation can reach your repository and MongoDB operations.
+
+
+# Step 1: Create client options
+clientOptions := options.Client()
+
+Conceptually:
+
+ClientOptions
+│
+├── URI = ""
+├── MaxPoolSize = default
+├── MinPoolSize = default
+├── RetryWrites = default
+├── TLS = default
+└── ...
+
+At this point, nothing is connected yet.
+
+Step 2: Configure the options
+clientOptions := options.Client().
+    ApplyURI(uri)
+
+Now the configuration becomes:
+
+ClientOptions
+│
+├── URI = mongodb://localhost:27017
+├── MaxPoolSize = default
+├── MinPoolSize = default
+├── RetryWrites = default
+└── ...
+Step 3: Connect
+client, err := mongo.Connect(ctx, clientOptions)
+
+Now the driver uses those settings to create the client.
+# Why not just pass the URI?
+
+Instead of:
+
+mongo.Connect(ctx, uri)
+
+the driver accepts an options object because there are many settings you may want to configure.
+
+For example:
+
+options.Client().
+    ApplyURI(uri).
+    SetMaxPoolSize(100).
+    SetMinPoolSize(10).
+    SetRetryWrites(true)
+
+This is much more flexible than adding lots of parameters to mongo.Connect().
+
+# Common client options
+| Option             | Purpose                           |
+| ------------------ | --------------------------------- |
+| `ApplyURI()`       | MongoDB connection string         |
+| `SetMaxPoolSize()` | Maximum database connections      |
+| `SetMinPoolSize()` | Minimum connections kept open     |
+| `SetRetryWrites()` | Retry failed write operations     |
+| `SetAppName()`     | Application name shown by MongoDB |
+| `SetTLSConfig()`   | Configure TLS/SSL                 |
+
+# Every file starts with:
+
+package book
+
+That means all of these files are compiled together into one package.
+
+Conceptually:
+
+book package
+│
+├── RegisterRoutes()    ← from routes.go
+├── NewHandler()        ← from handler.go
+├── NewService()        ← from service.go
+├── NewRepository()     ← from repository.go
+└── Book               ← from model.go
+
+Notice that the filename disappeared.
+
+# every DB operation should eventually timeout.
+
+Different from startup.
+
+Startup:
+
+10 seconds
+
+CRUD operations:
+
+3–5 seconds
+
+# During an HTTP request
+
+Never create a new background context.
+
+Instead use:
+
+ctx := r.Context()
+
+and pass it through:
+
+Handler
+
+↓
+
+Service
+
+↓
+
+Repository
+
+↓
+
+MongoDB
+
+# `Handler` Type
+
+```go
+type Handler struct {
+	service *Service
+}
+```
+
+A `Handler` stores a pointer to a `Service`.
+
+The handler itself does not contain business logic. Instead, it depends on a `Service` to perform business operations. This is an example of **dependency injection**, where the required dependency is provided from outside instead of being created inside the handler.
+
+---
+
+# Constructor
+
+By Go convention, functions whose names start with `New` are constructors. Their job is to create and initialize an object.
+
+```go
+func NewHandler(service *Service) *Handler {
+	return &Handler{
+		service: service,
+	}
+}
+```
+
+Let's break it down:
+
+### Method parameter
+
+```go
+service *Service
+```
+
+The constructor expects a pointer to a `Service`. This dependency will be stored inside the `Handler`.
+
+### Return type
+
+```go
+*Handler
+```
+
+The constructor returns a pointer to a newly created `Handler`.
+
+### Inside the constructor
+
+```go
+return &Handler{
+	service: service,
+}
+```
+
+This creates a new `Handler` struct and initializes its `service` field with the `service` parameter passed to the constructor.
+
+Think of it like:
+
+```go
+handler := Handler{
+	service: service,
+}
+
+return &handler
+```
+
+The `&` operator returns the memory address (pointer) of the newly created `Handler`.
+
+After construction, the object looks conceptually like this:
+
+```
+Handler
+│
+└── service ─────► Service
+```
+
+The handler does **not** contain a copy of the `Service`; it stores only a pointer to the same `Service` instance.
+
+---
+
+# Receiver
+
+```go
+func (h *Handler) CreateBook(...)
+```
+
+* `h` → Receiver variable
+* `*Handler` → Receiver type
+* `(h *Handler)` → Receiver declaration
+
+The receiver variable `h` refers to the current `Handler` object.
+
+Since the handler already stores a pointer to a `Service`, every handler method can access it using:
+
+```go
+h.service
+```
+
+For example:
+
+```go
+createdBook, err := h.service.CreateBook(ctx, &book)
+```
+
+---
+
+# Complete Flow
+
+```
+Repository
+      │
+      ▼
+NewRepository(collection)
+      │
+      ▼
+Service
+      │
+      ▼
+NewService(repository)
+      │
+      ▼
+Handler
+      │
+      ▼
+NewHandler(service)
+      │
+      ▼
+handler.CreateBook()
+      │
+      ▼
+h.service.CreateBook()
+```
+
+This pattern repeats throughout the application:
+
+* A **struct** stores its dependencies.
+* A **constructor (`New...`)** injects those dependencies.
+* The **methods** use the injected dependencies.
