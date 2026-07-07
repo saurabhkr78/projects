@@ -830,3 +830,489 @@ This pattern repeats throughout the application:
 * A **struct** stores its dependencies.
 * A **constructor (`New...`)** injects those dependencies.
 * The **methods** use the injected dependencies.
+
+# | Function       | Returns                  | Purpose                           |
+| -------------- | ------------------------ | --------------------------------- |
+| `InsertOne()`  | `*mongo.InsertOneResult` | Insert one document               |
+| `Find()`       | `*mongo.Cursor`          | Find multiple documents           |
+| `cursor.All()` | `[]Book`                 | Decode all documents into a slice |
+
+# One thing to understand deeply
+
+This line:
+
+cursor, err := r.collection.Find(ctx, bson.M{})
+
+does not return []Book.
+
+It returns a cursor.
+
+Think of a cursor like a database iterator.
+
+MongoDB
+
+↓
+
+Cursor
+
+↓
+
+Document 1
+
+↓
+
+Document 2
+
+↓
+
+Document 3
+
+Then:
+
+cursor.All(ctx, &books)
+
+takes every document from the cursor and decodes them into:
+
+[]Book
+
+That's why Find() and InsertOne() feel different:
+
+InsertOne() performs an action and returns metadata (InsertedID).
+Find() returns a stream of matching documents (a cursor), which you then decode into Go structs. This is the standard pattern you'll use for any query that can return multiple documents.
+# BSON stands for:
+
+Binary JSON
+
+# HOW TO work with bson
+First, what is BSON?
+
+MongoDB does not store JSON internally.
+
+It stores BSON.
+
+BSON stands for:
+
+Binary JSON
+
+Think of it like this:
+
+Go Struct
+      ↓
+BSON
+      ↓
+MongoDB
+
+When you insert a book:
+
+book := Book{
+    Title:  "Go",
+    Author: "Saurabh",
+    Year:   2026,
+}
+
+The MongoDB driver converts it into BSON.
+
+Conceptually:
+
+{
+    "title": "Go",
+    "author": "Saurabh",
+    "year": 2026
+}
+
+The driver handles this conversion automatically because of your bson struct tags:
+
+type Book struct {
+    Title string `bson:"title"`
+}
+What is bson.M?
+
+This is the one you'll use the most.
+
+Definition (simplified):
+
+type M map[string]interface{}
+
+So,
+
+bson.M
+
+is just a shortcut for:
+
+map[string]interface{}
+Example
+bson.M{
+    "title": "Go",
+}
+
+means
+
+{
+    "title": "Go"
+}
+Empty bson.M
+bson.M{}
+
+means
+
+{}
+
+Empty filter.
+
+Translation:
+
+Match every document.
+
+That's why
+
+collection.Find(ctx, bson.M{})
+
+returns all books.
+
+Think of bson.M as a filter
+
+Collection:
+
+[
+  {
+    "title":"Go",
+    "author":"A"
+  },
+  {
+    "title":"Java",
+    "author":"B"
+  }
+]
+
+Query:
+
+bson.M{
+    "title":"Go",
+}
+
+MongoDB reads it as:
+
+{
+   "title":"Go"
+}
+
+Result:
+
+[
+  {
+      "title":"Go",
+      "author":"A"
+  }
+]
+Common bson.M queries
+Find all
+bson.M{}
+
+↓
+
+{}
+Find by title
+bson.M{
+    "title":"Go",
+}
+
+↓
+
+{
+   "title":"Go"
+}
+Find by year
+bson.M{
+    "year":2026,
+}
+
+↓
+
+{
+   "year":2026
+}
+Multiple conditions
+bson.M{
+    "title":"Go",
+    "year":2026,
+}
+
+↓
+
+{
+    "title":"Go",
+    "year":2026
+}
+
+Equivalent SQL:
+
+WHERE title='Go'
+AND year=2026
+What about operators?
+
+MongoDB has operators beginning with $.
+
+Example:
+
+Greater than
+
+bson.M{
+    "year": bson.M{
+        "$gt":2020,
+    },
+}
+
+This becomes
+
+{
+    "year":{
+        "$gt":2020
+    }
+}
+
+Meaning:
+
+WHERE year > 2020
+
+Less than
+
+bson.M{
+    "year": bson.M{
+        "$lt":2025,
+    },
+}
+
+Greater than or equal
+
+bson.M{
+    "year": bson.M{
+        "$gte":2020,
+    },
+}
+
+In operator
+
+bson.M{
+    "author": bson.M{
+        "$in":[]string{
+            "A",
+            "B",
+        },
+    },
+}
+
+Equivalent SQL
+
+WHERE author IN ('A','B')
+Why is it called M?
+
+Because
+
+bson.M
+
+means
+
+Map
+
+MongoDB team chose
+
+M
+
+for
+
+Map
+Other BSON types
+
+Besides bson.M, you'll see several related types.
+
+1. bson.M
+bson.M{
+    "title":"Go",
+}
+
+Underlying type
+
+map[string]interface{}
+
+Order is not guaranteed.
+
+Most commonly used.
+
+2. bson.D
+
+Very important.
+
+Definition:
+
+type D []E
+
+where E is:
+
+type E struct {
+    Key string
+    Value interface{}
+}
+
+Example
+
+bson.D{
+    {"title","Go"},
+    {"year",2026},
+}
+
+Same query:
+
+{
+    "title":"Go",
+    "year":2026
+}
+
+But
+
+order is preserved.
+
+When do we use bson.D?
+
+Mostly when order matters.
+
+Example:
+
+Aggregation
+
+Indexes
+
+Sort
+
+Command documents
+
+3. bson.A
+
+"A" means Array.
+
+Example
+
+bson.A{
+    "Go",
+    "Java",
+    "Python",
+}
+
+↓
+
+[
+   "Go",
+   "Java",
+   "Python"
+]
+4. bson.E
+
+Single key-value pair.
+
+bson.E{
+    Key:"title",
+    Value:"Go",
+}
+
+Normally you won't use it directly.
+
+It's mainly used inside bson.D.
+
+
+# For your bookstore project
+
+
+// Get all books
+bson.M{}
+
+// Get one book by ID
+bson.M{
+    "_id": objectID,
+}
+
+// Find books by author
+bson.M{
+    "author": "Robert C. Martin",
+}
+
+// Update a book
+bson.M{
+    "$set": bson.M{
+        "title": "Clean Code",
+    },
+}
+
+# mongodb concepts 
+InsertOneResult → gives you InsertedID.
+Cursor → decode many documents with cursor.All(...).
+SingleResult → decode one document with Decode(...).
+
+# in updatebook method of repository Why call GetBookByID() afterwards?
+
+UpdateOne() does not return the updated document.
+
+It returns:
+
+UpdateResult
+
+├── MatchedCount
+├── ModifiedCount
+└── UpsertedID
+
+It doesn't contain the updated Book.
+
+So a common pattern is:
+
+Update
+
+↓
+
+Get Updated Document
+
+↓
+
+Return Book
+
+# One production note to save an extra query in update situation
+
+Returning r.GetBookByID(ctx, id) after a successful update is a reasonable pattern for many REST APIs because clients often expect the latest state of the resource.
+
+However, it does perform two database operations:
+
+UpdateOne()
+FindOne()
+
+If you want to update and return the updated document in a single round trip, MongoDB also provides FindOneAndUpdate(). It's commonly used when the updated document is needed immediately and avoids the extra query.
+
+# DeleteOne() returns:
+
+result, err := collection.DeleteOne(...)
+
+The result contains:
+
+DeleteResult
+
+└── DeletedCount
+
+Example:
+
+DeletedCount = 1
+
+means:
+
+One document was deleted.
+
+If:
+
+DeletedCount = 0
+
+it means:
+
+No document matched the filter.
+
+# | Operation | MongoDB Method | Returns           | Important Result Field          |
+| --------- | -------------- | ----------------- | ------------------------------- |
+| Create    | `InsertOne()`  | `InsertOneResult` | `InsertedID`                    |
+| Get All   | `Find()`       | `Cursor`          | `cursor.All()`                  |
+| Get One   | `FindOne()`    | `SingleResult`    | `Decode()`                      |
+| Update    | `UpdateOne()`  | `UpdateResult`    | `MatchedCount`, `ModifiedCount` |
+| Delete    | `DeleteOne()`  | `DeleteResult`    | `DeletedCount`                  |
