@@ -1316,3 +1316,388 @@ No document matched the filter.
 | Get One   | `FindOne()`    | `SingleResult`    | `Decode()`                      |
 | Update    | `UpdateOne()`  | `UpdateResult`    | `MatchedCount`, `ModifiedCount` |
 | Delete    | `DeleteOne()`  | `DeleteResult`    | `DeletedCount`                  |
+
+
+# Imagine after one year.
+
+You decide to change MongoDB to PostgreSQL.
+
+If your code looked like:
+
+func CreateBook(w http.ResponseWriter, r *http.Request) {
+    collection.InsertOne(...)
+}
+
+Now every handler needs to change.
+
+That's a nightmare.
+
+With your architecture:
+
+Handler
+
+↓
+
+Service
+
+↓
+
+Repository
+
+↓
+
+MongoDB
+
+Only the repository changes.
+
+The handler and service don't care whether you're using:
+
+MongoDB
+PostgreSQL
+MySQL
+Redis
+
+They simply call the repository.
+
+Another example
+
+Suppose today you expose a REST API.
+
+Tomorrow the company wants gRPC.
+
+Old design:
+
+REST Handler
+
+↓
+
+MongoDB
+
+You'd rewrite almost everything.
+
+With your design:
+
+REST Handler
+
+↓
+
+Service
+
+↓
+
+Repository
+
+Tomorrow:
+
+gRPC Handler
+
+↓
+
+Service
+
+↓
+
+Repository
+
+The service and repository stay the same.
+
+Only the transport layer changes.
+
+# Company Type	Common Choice of db or ORM?
+Startups / MVPs	GORM
+Product companies	pgx or database/sql
+High-performance systems	pgx
+Enterprise applications	Depends on the team's standards
+
+# when changing database from mongo to postgres what i need to change?
+Let's assume your application is already running:
+
+Client
+   │
+   ▼
+Router
+   │
+   ▼
+Handler
+   │
+   ▼
+Service
+   │
+   ▼
+Repository
+   │
+   ▼
+MongoDB
+
+Now your company says:
+
+"We're moving from MongoDB to PostgreSQL."
+
+Most of your code does not change.
+
+Layer by layer
+1. Handler
+
+Current:
+
+func (h *Handler) CreateBook(...) {
+    h.service.CreateBook(...)
+}
+
+Does it know MongoDB exists?
+
+No.
+
+It only knows about the service.
+
+✅ No changes.
+
+2. Service
+
+Current:
+
+func (s *Service) CreateBook(ctx context.Context, book *Book) (*Book, error) {
+    return s.repository.CreateBook(ctx, book)
+}
+
+Does it know whether the repository uses:
+
+MongoDB?
+PostgreSQL?
+MySQL?
+
+No.
+
+✅ No changes.
+
+3. Repository
+
+This is where the database-specific code lives.
+
+Current MongoDB repository:
+
+type Repository struct {
+    collection *mongo.Collection
+}
+
+This changes.
+
+PostgreSQL version might become:
+
+type Repository struct {
+    db *sql.DB
+}
+
+or if using GORM:
+
+type Repository struct {
+    db *gorm.DB
+}
+Repository methods change
+
+MongoDB:
+
+r.collection.InsertOne(...)
+
+becomes
+
+PostgreSQL:
+
+db.Exec(...)
+
+or
+
+db.QueryRow(...)
+
+or with GORM:
+
+db.Create(book)
+
+Only this layer changes.
+
+4. Database package
+
+Current:
+
+pkg/database/
+
+mongodb.go
+
+After migration:
+
+pkg/database/
+
+postgres.go
+
+Instead of
+
+mongo.Connect(...)
+
+you write
+
+sql.Open(...)
+
+or
+
+gorm.Open(...)
+5. Config
+
+Current:
+
+MONGO_URI=...
+
+becomes
+
+POSTGRES_DSN=...
+
+Maybe also:
+
+POSTGRES_HOST=
+POSTGRES_PORT=
+POSTGRES_DB=
+POSTGRES_USER=
+POSTGRES_PASSWORD=
+6. Main
+
+Current:
+
+client, err := database.Connect(cfg.MongoURI)
+
+becomes
+
+db, err := database.Connect(cfg.PostgresDSN)
+
+Then
+
+repo := book.NewRepository(db)
+
+instead of
+
+repo := book.NewRepository(collection)
+What doesn't change?
+
+These files stay almost identical:
+
+internal/book/
+
+handler.go      ✅
+
+service.go      ✅
+
+routes.go       ✅
+
+Only:
+
+repository.go
+
+changes.
+
+Visual comparison
+MongoDB
+Repository
+
+↓
+
+collection.InsertOne()
+
+↓
+
+MongoDB
+PostgreSQL
+Repository
+
+↓
+
+INSERT INTO books ...
+
+↓
+
+PostgreSQL
+
+Same handler.
+
+Same service.
+
+Different repository.
+
+Even the API stays the same
+
+Your client still sends:
+
+POST /books
+
+Body:
+
+{
+  "title":"Go",
+  "author":"Saurabh",
+  "year":2026
+}
+
+The client doesn't even know you've switched databases.
+
+This is called abstraction
+
+The repository hides how the data is stored.
+
+The service only knows:
+
+s.repository.CreateBook(...)
+
+It doesn't know whether that method eventually does:
+
+InsertOne(...)
+
+or
+
+INSERT INTO books ...
+
+or
+
+db.Create(...)
+A small improvement many production teams make
+
+Many teams go one step further and introduce an interface.
+
+For example:
+
+type Repository interface {
+    CreateBook(ctx context.Context, book *Book) (*Book, error)
+    GetBooks(ctx context.Context) ([]Book, error)
+    GetBookByID(ctx context.Context, id string) (*Book, error)
+    UpdateBook(ctx context.Context, id string, book *Book) (*Book, error)
+    DeleteBook(ctx context.Context, id string) error
+}
+
+Then the service depends on the interface instead of a concrete MongoDB repository.
+
+Service
+    │
+    ▼
+Repository Interface
+    ▲            ▲
+    │            │
+Mongo Repo   Postgres Repo
+
+With this design, switching databases often means changing only the dependency wiring in main.go:
+
+service := book.NewService(postgresRepo)
+
+instead of:
+
+service := book.NewService(mongoRepo)
+
+The service code itself doesn't change at all.
+
+This is why companies invest in this architecture
+
+You're not writing extra layers just to make the code longer.
+
+You're buying flexibility:
+
+Swap MongoDB for PostgreSQL.
+Replace REST with gRPC.
+Add caching later.
+Mock the repository during tests.
+
+Those changes stay localized because each layer has a single responsibility and only knows about the layer directly beneath it. That's one of the biggest reasons layered architectures remain popular in production systems.
