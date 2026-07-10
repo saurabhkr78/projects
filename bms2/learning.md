@@ -436,3 +436,355 @@ func Load() (*Config, error) {
 Notice something:
 
 Every line reads almost like English.
+
+# each package should have one responsibility.
+# We are designing packages with a single responsibility."
+
+Because SRP applies to more than just functions:
+
+Functions should have one responsibility.
+Structs should have one responsibility.
+Packages should have one responsibility.
+
+# context.Context carries request-scoped information 
+
+# There are three different things:
+
+Database (PostgreSQL, MySQL, MongoDB)
+Driver/Client (pgx, MongoDB driver, Redis client)
+Connection Pool (managed by the driver/client)
+
+# "One request = One database connection."
+
+That's not true.
+
+The correct mental model is:
+
+1000 HTTP Requests
+
+↓
+
+One Shared Connection Pool
+
+↓
+
+20 Actual Database Connections
+
+The pool decides which request gets which connection and when it's returned.
+
+Using MySQL you might see:
+
+db, err := sql.Open(...) already maintains a connection pool.
+MongoDB driver:
+
+client, err := mongo.Connect(...)
+
+That client also manages a pool of connections.
+
+
+# This syntax
+func (cfg *Config) Connect() (*pgxpool.Pool, error) {
+}
+
+means:
+
+Connect is a method of the Config type.
+
+Read it like English:
+
+"A Config object can connect."
+
+Example:
+
+cfg, _ := config.Load()
+
+db, err := cfg.Connect()
+
+Notice you're calling the method on the object.
+
+Compare it with a package function
+func Connect(cfg *Config) (*pgxpool.Pool, error) {
+}
+
+Usage:
+
+cfg, _ := config.Load()
+
+db, err := database.Connect(cfg)
+
+Now you're calling a package function, not a method.
+
+
+# Version 1 (Current)
+func Connect(cfg *config.Config) (*pgxpool.Pool, error) {
+	pool, err := pgxpool.New(context.Background(), cfg.DatabaseURL)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := pool.Ping(context.Background()); err != nil {
+		pool.Close()
+		return nil, err
+	}
+
+	return pool, nil
+}
+
+Question:
+
+Who created this context?
+
+context.Background()
+
+Nobody.
+
+The database package created it.
+
+Why is this not ideal?
+
+Suppose tomorrow your application receives
+
+Ctrl + C
+
+or Kubernetes says
+
+Stop the application.
+
+Who should tell every package to stop?
+
+The database package?
+
+No.
+
+The config package?
+
+No.
+
+The main application.
+
+Who owns the application?
+
+Always remember this.
+
+Application
+
+↓
+
+main.go
+
+Everything starts from
+
+func main()
+
+Therefore,
+
+main owns the application's lifecycle.
+
+# Why doesn't the entity have JSON tags?
+
+For example:
+
+Title string `json:"title"`
+
+Answer:
+
+Because this is our domain entity.
+
+It shouldn't know anything about HTTP or JSON.
+
+Those belong to the DTO layer.
+
+This is one of the benefits of Clean Architecture.
+
+Why no db tags?
+
+For example:
+
+Title string `db:"title"`
+
+Again,
+
+the entity shouldn't know about PostgreSQL.
+
+The repository is responsible for mapping database rows to the entity.
+
+Why no validation?
+
+For example:
+
+Title string `validate:"required"`
+
+Because validation belongs to the service layer (business rules) or the request DTO (input validation), not the entity itself.
+
+# Different DTO structs are used for different request and response payloads.
+package book
+
+import "time"
+
+type CreateBookRequest struct { to the server
+	Title       string    `json:"title"`
+	Author      string    `json:"author"`
+	ISBN        string    `json:"isbn"`
+	PublishedAt time.Time `json:"published_at"`
+}
+
+type UpdateBookRequest struct { to the server
+	Title       string    `json:"title"`
+	Author      string    `json:"author"`
+	ISBN        string    `json:"isbn"`
+	PublishedAt time.Time `json:"published_at"`
+}
+
+type BookResponse struct { from server to the client
+	ID          int64     `json:"id"`
+	Title       string    `json:"title"`
+	Author      string    `json:"author"`
+	ISBN        string    `json:"isbn"`
+	PublishedAt time.Time `json:"published_at"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+Each API operation has a different data contract. A CreateBookRequest contains only the fields needed to create a book, an UpdateBookRequest contains only editable fields, and a BookResponse contains the data the server wants to expose to the client. This keeps the API contract separate from the domain entity and prevents exposing or accepting fields that shouldn't cross the API boundary.
+
+# The repository is responsible for persisting and retrieving Book entities.
+storing and retreiving the book that's all
+
+# The repository should be an interface, not a struct.
+
+Why?
+
+Because today we use:
+
+PostgreSQL
+
+Tomorrow we might use:
+
+MongoDB
+
+or
+
+Mock Repository (Tests)
+
+The service shouldn't care.
+
+# Imagine this.
+
+Today
+
+Service
+
+↓
+
+PostgreSQL
+
+Tomorrow
+
+Service
+
+↓
+
+MongoDB
+
+Should the service change?
+
+No.
+
+The service only knows:
+
+type Repository interface
+
+The implementation can change.
+
+--The service depends on the interface, not PostgreSQL.
+
+# Why context.Context?
+
+Every repository method accepts:
+
+ctx context.Context
+
+because every database operation should be cancellable and should respect request deadlines.
+
+We'll use it like this later:
+
+row := db.QueryRow(ctx, ...)
+
+For now, just remember:
+
+Every operation that touches the database accepts a context.Context.
+
+# Why is this called Loose Coupling?
+
+Imagine we didn't use an interface.
+
+Service would do:
+
+type Service struct {
+	repo *PostgresRepository
+}
+
+Now if tomorrow we move to MongoDB...
+
+Everything breaks.
+
+You have to change
+
+*PostgresRepository
+
+↓
+
+*MongoRepository
+
+Everywhere.
+
+With an interface
+
+type Service struct {
+	repo Repository
+}
+
+Now Service doesn't care.
+
+You can inject
+
+PostgresRepository
+
+or
+
+MongoRepository
+
+or
+
+MockRepository
+
+without changing the service.
+
+That's loose coupling.
+
+
+# This is the biggest reason interfaces exist.
+
+Suppose you're testing your service.
+
+Do you really want your tests to connect to PostgreSQL?
+
+❌ No.
+
+Instead:
+
+type MockRepository struct{}
+
+implements
+
+Create()
+GetByID()
+List()
+Update()
+Delete()
+
+Now your tests run without a real database.
+
+This is one of the biggest practical benefits of programming to an interface.
+
+# note:The database-specific repository implements the interface.
