@@ -2057,3 +2057,177 @@ PostgreSQL
 
 # The responsibility of main.go file is only
 ts only job is to create dependencies, wire them together, and start the server
+
+
+# phase 2
+
+# we are cleaning our handler with helper function or util functions
+File 1 : internal/http/response.go
+package http
+
+import (
+	"encoding/json"
+	"net/http"
+)
+
+func WriteJSON(w http.ResponseWriter, status int, data any) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+
+	return json.NewEncoder(w).Encode(data)
+}
+Let's understand every line
+Why data any?
+
+Suppose
+
+CreateBook returns
+
+BookResponse
+
+GetAll returns
+
+[]BookResponse
+
+Health returns
+
+HealthResponse
+
+We don't know beforehand.
+
+So
+
+data any
+
+means
+
+Accept any Go type.
+
+Equivalent to old
+
+interface{}
+Why return error?
+
+Because
+
+json.NewEncoder(...).Encode(...)
+
+can fail.
+
+Example
+
+Broken connection.
+
+So
+
+return err
+
+lets the handler decide.
+
+
+# File 2 : internal/http/error.go
+package http
+
+import (
+	"encoding/json"
+	"net/http"
+)
+
+type ErrorResponse struct {
+	Error string `json:"error"`
+}
+
+func WriteError(
+	w http.ResponseWriter,
+	status int,
+	message string,
+) {
+
+	_ = WriteJSON(
+		w,
+		status,
+		ErrorResponse{
+			Error: message,
+		},
+	)
+}
+
+Instead of
+
+http.Error(...)
+
+client receives
+
+{
+    "error":"invalid request body"
+}
+
+Much more RESTful.
+
+Why use JSON instead of http.Error()?
+
+http.Error() returns plain text:
+
+invalid request body
+
+Most APIs today return structured JSON:
+
+{
+  "error": "invalid request body"
+}
+
+This is easier for frontend applications to parse and display.
+
+
+One important principle:
+
+# The frontend should never have to guess the response format.
+
+Whether the request succeeds or fails, the JSON structure should always be predictable.
+
+Our API Response Standard
+Success Response
+{
+    "success": true,
+    "data": { ... }
+}
+
+or
+
+{
+    "success": true,
+    "data": [
+        ...
+    ]
+}
+Error Response
+{
+    "success": false,
+    "error": {
+        "message": "book not found"
+    }
+}
+
+Notice
+
+The frontend always checks
+
+success
+
+Then
+
+success == true
+
+↓
+
+Read data
+
+or
+
+success == false
+
+↓
+
+Read error.message
+
+No guessing.
