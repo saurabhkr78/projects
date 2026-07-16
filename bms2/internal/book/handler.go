@@ -3,7 +3,6 @@ package book
 import (
 	"encoding/json"
 	"net/http"
-	"strconv"
 
 	httphelper "bms2/internal/http"
 )
@@ -19,37 +18,38 @@ func NewHandler(service *BookService) *Handler {
 }
 
 func (h *Handler) CreateBook(w http.ResponseWriter, r *http.Request) {
-	var req CreateBookRequest
-
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	var newBook CreateBookRequest
+	//call decoder ,decode it into var and write if any error occurs
+	if err := json.NewDecoder(r.Body).Decode(&newBook); err != nil {
 		httphelper.WriteError(
 			w,
 			http.StatusBadRequest,
-			"invalid request body",
+			"Invalid request body",
 		)
 		return
 	}
-
-	if err := h.service.Create(r.Context(), &req); err != nil {
+	//call the service layer to create the book
+	if err := h.service.Create(r.Context(), &newBook); err != nil {
 		httphelper.WriteError(
 			w,
 			http.StatusInternalServerError,
-			err.Error(),
+			err.Error(), //it's a inbuilt interface that returns the error message as a string
 		)
 		return
 	}
-
+	//write the response
 	httphelper.WriteJSON(
 		w,
 		http.StatusCreated,
 		map[string]string{
-			"message": "book created successfully",
+			"message": "Book created successfully",
 		},
 	)
+
 }
 
 func (h *Handler) GetBookByID(w http.ResponseWriter, r *http.Request) {
-	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	id, err := httphelper.ParseIntPathParam(r, "id")
 	if err != nil {
 		httphelper.WriteError(
 			w,
@@ -95,7 +95,7 @@ func (h *Handler) GetAllBooks(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) UpdateBook(w http.ResponseWriter, r *http.Request) {
-	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	id, err := httphelper.ParseIntPathParam(r, "id")
 	if err != nil {
 		httphelper.WriteError(
 			w,
@@ -135,7 +135,7 @@ func (h *Handler) UpdateBook(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) DeleteBook(w http.ResponseWriter, r *http.Request) {
-	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	id, err := httphelper.ParseIntPathParam(r, "id")
 	if err != nil {
 		httphelper.WriteError(
 			w,
