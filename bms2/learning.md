@@ -3791,3 +3791,912 @@ b
 ?
 
 It is the object on which the method is called.
+
+
+
+# How does a logging middleware know the HTTP status code?
+
+Your current middleware probably looks like this:
+
+func Logging(next http.Handler) http.Handler {
+    return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+        start := time.Now()
+
+        next.ServeHTTP(w, r)
+
+        log.Printf("%s %s took %v",
+            r.Method,
+            r.URL.Path,
+            time.Since(start),
+        )
+    })
+}
+
+It can log:
+
+✅ Method
+✅ Path
+✅ Time
+
+But it cannot log:
+
+❌ 200
+❌ 404
+❌ 500
+
+Why?
+
+Because http.ResponseWriter has no method like:
+
+w.StatusCode()
+
+So we'll build our own wrapper around it.
+
+This is the next concept
+
+We'll create something like:
+
+type responseWriter struct {
+    http.ResponseWriter
+    statusCode int
+}
+
+At first glance, it looks like a tiny struct.
+
+In reality, it teaches four major Go concepts:
+
+Embedding
+Method promotion
+Method overriding
+How decorators/wrappers work
+
+Those four concepts appear everywhere in Go—not just in net/http.
+
+# learn the concept of decorator/wrapping ,embedding
+
+# decorator
+
+what a Decorator (Wrapper) does.
+
+It doesn't change the original object.
+
+It only adds something before or after it.
+
+like e.g
+
+Customer
+    │
+    ▼
+Record Time
+    │
+    ▼
+Wear Gloves
+    │
+    ▼
+Wash Hands
+    │
+    ▼
+Cook Food
+
+the cook never changes simply wrapping more behaviour around it(before or after)
+
+Step 3: Same Idea in Go
+
+Suppose we have a function.
+
+func SayHello() {
+    fmt.Println("Hello")
+}
+
+Output
+
+Hello
+
+Now suppose we want logging.
+
+We could change it.
+
+func SayHello() {
+    fmt.Println("Starting...")
+    fmt.Println("Hello")
+    fmt.Println("Finished...")
+}
+
+Works.
+
+But what if we have 500 functions?
+
+You'll repeat logging everywhere.
+
+Bad.
+
+Instead we wrap it.
+
+Original
+
+func SayHello() {
+    fmt.Println("Hello")
+}
+
+Wrapper
+
+func Logging(next func()) func() {
+    return func() {
+        fmt.Println("Starting")
+        next()
+        fmt.Println("Finished")
+    }
+}
+
+Now
+
+hello := Logging(SayHello)
+
+hello()
+
+Output
+
+Starting
+Hello
+Finished
+
+Did SayHello change?
+
+No.
+
+We decorated it.
+
+Step 4: Why is it called "next"?
+
+Because the wrapper doesn't know what it's wrapping.
+
+It simply says
+
+"Whatever comes next, I'll call it."
+
+Wrapper
+   │
+   ▼
+next()
+
+Maybe next is
+
+SayHello
+
+Maybe
+
+Login
+
+Maybe
+
+DeleteUser
+
+Wrapper doesn't care.
+
+Step 5: HTTP Server Example
+
+Suppose this is our handler.
+
+func Home(w http.ResponseWriter, r *http.Request) {
+    fmt.Fprintln(w, "Home")
+}
+
+Without middleware
+
+Client
+   │
+   ▼
+Home Handler
+
+Now we want logging.
+
+Instead of changing Home,
+
+we wrap it.
+
+func Logging(next http.Handler) http.Handler {
+
+    return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+
+        log.Println("Request Started")
+
+        next.ServeHTTP(w, r)
+
+        log.Println("Request Finished")
+
+    })
+}
+
+Now flow becomes
+
+Client
+
+   │
+
+   ▼
+
+Logging Middleware
+
+   │
+
+   ▼
+
+Home Handler
+Step 6: Visualize the Call Stack
+
+Suppose request arrives.
+
+Execution
+
+Logging enters
+
+↓
+
+Print Start
+
+↓
+
+next.ServeHTTP()
+
+↓
+
+Home Handler
+
+↓
+
+returns
+
+↓
+
+Print Finish
+
+↓
+
+returns
+
+Exactly like function calls.
+
+Step 7: Multiple Wrappers
+
+Now imagine three wrappers.
+
+Recovery
+
+↓
+
+Logging
+
+↓
+
+Authentication
+
+↓
+
+Handler
+
+Execution
+
+Recovery enters
+
+↓
+
+Logging enters
+
+↓
+
+Authentication enters
+
+↓
+
+Handler runs
+
+↓
+
+Authentication exits
+
+↓
+
+Logging exits
+
+↓
+
+Recovery exits
+
+Like nested boxes.
+
+Recovery(
+    Logging(
+        Authentication(
+            Handler
+        )
+    )
+)
+Step 8: Why "Wrapper"?
+
+Because it literally wraps another object.
+
+Wrapper
+    │
+    ▼
+Original
+
+It surrounds it.
+
+Nothing more.
+
+Step 9: Why "Decorator"?
+
+This term comes from the classic Decorator Design Pattern.
+
+Imagine a plain coffee.
+
+Coffee
+
+Add milk.
+
+Milk(Coffee)
+
+Add sugar.
+
+Sugar(
+      Milk(
+          Coffee
+      )
+)
+
+Coffee didn't change.
+
+You decorated it.
+
+Go middleware works exactly the same way.
+
+Step 10: Middleware = Decorator
+
+This is why middleware always looks like
+
+func Middleware(next http.Handler) http.Handler
+
+It takes
+
+Handler
+
+returns
+
+New Handler
+
+The new handler simply surrounds the old handler.
+
+Old Handler
+
+↓
+
+Wrapped Handler
+
+↓
+
+Returned Handler
+Step 11: The Mental Model
+
+Imagine this diagram whenever you see middleware:
+
+Incoming Request
+
+        │
+
+        ▼
+
++----------------+
+|   Recovery     |
++----------------+
+        │
+
+        ▼
+
++----------------+
+|   Logging      |
++----------------+
+        │
+
+        ▼
+
++----------------+
+| Authentication |
++----------------+
+        │
+
+        ▼
+
++----------------+
+|   Handler      |
++----------------+
+        │
+
+        ▼
+
+Outgoing Response
+
+Each layer:
+
+does something before,
+optionally calls next,
+does something after.
+
+That is the entire Decorator Pattern in Go.
+
+
+# Embedding in go
+Many people confuse embedding with inheritance from Java/C++. It is not inheritance. Go follows a different philosophy: "composition over inheritance".
+
+Step 1: Imagine a Person
+
+Suppose we have a Person.
+
+type Person struct {
+	Name string
+	Age  int
+}
+
+Usage:
+
+p := Person{
+	Name: "Saurabh",
+	Age: 22,
+}
+
+fmt.Println(p.Name)
+fmt.Println(p.Age)
+
+Output
+
+Saurabh
+22
+
+Simple.
+
+Step 2: Now We Need an Employee
+
+Every employee is also a person.
+
+In Java you might write
+
+class Employee extends Person
+
+Go says:
+
+Don't inherit.
+
+Embed.
+
+type Employee struct {
+	Person
+	Salary int
+}
+
+Notice something?
+
+There is no field name.
+
+Not
+
+Person Person
+
+Just
+
+Person
+
+This is called embedding.
+
+Step 3: Memory Layout
+
+Think of it like this.
+
+Employee
+
++----------------+
+| Person         |
+|  Name          |
+|  Age           |
++----------------+
+| Salary         |
++----------------+
+
+Employee literally contains a Person.
+
+It's not pointing to another object.
+
+It's inside it.
+
+Step 4: Creating One
+e := Employee{
+	Person: Person{
+		Name: "Saurabh",
+		Age: 22,
+	},
+	Salary: 50000,
+}
+
+Normally we'd expect
+
+fmt.Println(e.Person.Name)
+
+Right?
+
+But Go does something magical.
+
+Step 5: Field Promotion
+
+Go automatically promotes embedded fields.
+
+So both work.
+
+fmt.Println(e.Person.Name)
+
+AND
+
+fmt.Println(e.Name)
+
+Output
+
+Saurabh
+
+Why?
+
+Because Go says:
+
+If Employee doesn't have Name,
+check the embedded Person.
+
+It's as if Go searches inside.
+
+Visual
+
+Employee
+
+Name?
+
+↓
+
+Employee has no Name
+
+↓
+
+Look inside Person
+
+↓
+
+Found Name
+Step 6: Methods Are Promoted Too
+
+Suppose Person has a method.
+
+func (p Person) Introduce() {
+	fmt.Println("Hi, I'm", p.Name)
+}
+
+Employee never defines it.
+
+Yet
+
+e.Introduce()
+
+works.
+
+Why?
+
+Go looks here.
+
+Employee
+
+↓
+
+No Introduce()
+
+↓
+
+Look inside Person
+
+↓
+
+Found Introduce()
+
+Output
+
+Hi, I'm Saurabh
+
+Again,
+
+Employee didn't inherit it.
+
+Employee contains Person.
+
+Step 7: Why Embed?
+
+Without embedding
+
+type Employee struct {
+	Person Person
+	Salary int
+}
+
+Access
+
+e.Person.Name
+e.Person.Age
+e.Person.Introduce()
+
+With embedding
+
+type Employee struct {
+	Person
+	Salary int
+}
+
+Access
+
+e.Name
+e.Age
+e.Introduce()
+
+Less typing.
+
+Cleaner API.
+
+Step 8: Multiple Embedding
+
+Go even allows this.
+
+type Address struct {
+	City string
+}
+
+type Employee struct {
+	Person
+	Address
+}
+
+Now
+
+e.Name
+e.City
+
+work directly.
+
+Go searches
+
+Employee
+
+↓
+
+Name?
+
+↓
+
+Person
+
+↓
+
+Found
+
+and
+
+Employee
+
+↓
+
+City?
+
+↓
+
+Address
+
+↓
+
+Found
+Step 9: Method Override?
+
+Suppose Person has
+
+func (p Person) Speak() {
+	fmt.Println("Person speaking")
+}
+
+Employee defines
+
+func (e Employee) Speak() {
+	fmt.Println("Employee speaking")
+}
+
+Now
+
+e.Speak()
+
+prints
+
+Employee speaking
+
+The Employee method hides the promoted one.
+
+You can still access the embedded version explicitly:
+
+e.Person.Speak()
+
+Output
+
+Person speaking
+Step 10: Where You'll See Embedding in Go
+1. HTTP
+type MyHandler struct {
+	http.ServeMux
+}
+
+Your handler automatically gets all the methods of ServeMux, like Handle and ServeHTTP.
+
+2. Database
+type Repository struct {
+	*pgxpool.Pool
+}
+
+Now the repository can directly call methods such as
+
+repo.Query(...)
+repo.Exec(...)
+
+because the pool is embedded.
+
+3. Configuration
+type Server struct {
+	Config
+}
+
+Instead of
+
+server.Config.Port
+
+you can write
+
+server.Port
+4. Logger
+type App struct {
+	*log.Logger
+}
+
+Then
+
+app.Println("started")
+
+instead of
+
+app.Logger.Println("started")
+Step 11: Embedding Interfaces
+
+You can even embed interfaces.
+
+type ReaderWriter struct {
+	io.Reader
+	io.Writer
+}
+
+Now any type implementing both interfaces satisfies ReaderWriter.
+
+This is a common way to compose behaviors in Go.
+
+
+
+1. Interfaces define contracts
+type BookRepository interface {
+    Create(ctx context.Context, book Book) error
+    GetByID(ctx context.Context, id int) (Book, error)
+}
+
+Service doesn't care whether data comes from:
+
+PostgreSQL
+MongoDB
+Redis
+Mock for testing
+
+It only knows:
+
+"Give me something that satisfies BookRepository."
+
+2. Embedding composes types
+
+Suppose every HTTP handler needs a logger.
+
+Without embedding:
+
+type Handler struct {
+    logger *slog.Logger
+}
+
+You write:
+
+h.logger.Info("Creating book")
+
+With embedding:
+
+type Handler struct {
+    *slog.Logger
+}
+
+Now you can write:
+
+h.Info("Creating book")
+
+The logger's methods are promoted to Handler.
+
+3. Decorators wrap behavior
+
+Your actual handler:
+
+func CreateBook(w http.ResponseWriter, r *http.Request) {
+    fmt.Fprintln(w, "Book Created")
+}
+
+Now wrap it:
+
+Logging(
+    Authentication(
+        Recovery(
+            CreateBook,
+        ),
+    ),
+)
+
+Request flow:
+
+Request
+   │
+   ▼
+Logging
+   │
+   ▼
+Authentication
+   │
+   ▼
+Recovery
+   │
+   ▼
+CreateBook
+
+The handler never changes. Each wrapper adds one responsibility.
+
+Notice something?
+
+Each concept solves a completely different problem.
+
+Interface
+
+"I don't care who you are, as long as you can do this."
+
+Service
+   │
+depends on
+   ▼
+BookRepository
+Embedding
+
+"I already have this inside me."
+
+Handler
+   │
+contains
+   ▼
+Logger
+Decorator
+
+"Before I let you work, I'll do something."
+
+Request
+
+↓
+
+Logging
+
+↓
+
+Authentication
+
+↓
+
+Handler
