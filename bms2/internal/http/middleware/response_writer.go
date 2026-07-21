@@ -11,3 +11,10 @@ func (rw *responseWriter) WriteHeader(statusCode int) {
 	rw.statusCode = statusCode
 	rw.ResponseWriter.WriteHeader(statusCode)
 }
+func (rw *responseWriter) Write(b []byte) (int, error) {
+	if rw.statusCode == 0 {
+		rw.statusCode = http.StatusOK
+	}
+
+	return rw.ResponseWriter.Write(b)
+}

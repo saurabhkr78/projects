@@ -7,11 +7,25 @@ import (
 )
 
 func Logging(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	return http.HandlerFunc(func(
+		w http.ResponseWriter,
+		r *http.Request,
+	) {
 		start := time.Now()
 
-		next.ServeHTTP(w, r)
+		rw := &responseWriter{
+			ResponseWriter: w,
+			statusCode:     http.StatusOK,
+		}
 
-		log.Printf("%s %s took %v", r.Method, r.URL.Path, time.Since(start))
+		next.ServeHTTP(rw, r)
+
+		log.Printf(
+			"%s %s %d %v",
+			r.Method,
+			r.URL.Path,
+			rw.statusCode,
+			time.Since(start),
+		)
 	})
 }
