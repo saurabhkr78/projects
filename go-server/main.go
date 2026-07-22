@@ -1,6 +1,10 @@
 package main
 
 import (
+	"bms2/internal/book"
+	"bms2/internal/config"
+	"bms2/internal/database"
+	"bms2/internal/http/middleware"
 	"fmt"
 	"log"
 	"net/http"
@@ -40,14 +44,35 @@ func formHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 func main() {
-	fs := http.FileServer(http.Dir("./static"))
-
-	http.Handle("/", fs)
-	http.HandleFunc("/form", formHandler)
-	http.HandleFunc("/hello", helloHandler)
-
-	fmt.Printf("server is started on 8080")
-	if err := http.ListenAndServe(":8080", nil); err != nil {
+	cfg, err := config.Load()
+	if err != nil {
 		log.Fatal(err)
 	}
+
+	db, err := database.Connect(cfg)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer db.Close()
+
+	repo := book.NewRepository(db)
+	service := book.NewService(repo)
+	handler := book.NewHandler(service)
+
+	router := http.NewServeMux()
+
+	book.RegisterRoutes(router, handler)
+
+	app := middleware.Chain(
+		router,
+		middleware.Logging,
+		middleware.Recovery,
+	)
+
+	server := &http.Server{
+		Addr:    ":" + cfg.Port,
+		Handler: app,
+	}
+
+	log.Fatal(server.ListenAndServe())
 }

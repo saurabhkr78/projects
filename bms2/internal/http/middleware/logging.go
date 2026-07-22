@@ -6,11 +6,10 @@ import (
 	"time"
 )
 
+// refer line number 2465 in learning.md
 func Logging(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(
-		w http.ResponseWriter,
-		r *http.Request,
-	) {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+
 		start := time.Now()
 
 		rw := &responseWriter{
