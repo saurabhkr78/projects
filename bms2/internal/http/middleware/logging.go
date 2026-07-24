@@ -1,7 +1,8 @@
 package middleware
 
 import (
-	"log"
+	"bms2/internal/requestid"
+	"bms2/pkg/logger"
 	"net/http"
 	"time"
 )
@@ -10,6 +11,7 @@ import (
 func Logging(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 
+		requestID := requestid.FromContext(r.Context())
 		start := time.Now()
 
 		rw := &responseWriter{
@@ -17,12 +19,18 @@ func Logging(next http.Handler) http.Handler {
 			statusCode:     http.StatusOK,
 		}
 
-		next.ServeHTTP(rw, r)
-
-		log.Printf(
-			"%s %s %d %v",
+		logger.Info(
+			"[RequestID=%s] Started %s %s",
+			requestID,
 			r.Method,
 			r.URL.Path,
+		)
+
+		next.ServeHTTP(rw, r)
+
+		logger.Info(
+			"[RequestID=%s] Completed %d in %v",
+			requestID,
 			rw.statusCode,
 			time.Since(start),
 		)

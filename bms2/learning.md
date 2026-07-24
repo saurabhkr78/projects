@@ -5125,4 +5125,42 @@ Because Go treats them as completely different types.
 
 
 # Packages should define "keys" as an unexported type to avoid collisions.to create unique identities for context keys across packages.
+TODO://
+
+
+#  a pkg/logger package, stop using the standard log package directly inside middleware.
+
+Instead:
+
+logger.Info(
+    "request completed",
+    "request_id", requestID,
+    "method", r.Method,
+    "path", r.URL.Path,
+    "status", rw.statusCode,
+    "duration", time.Since(start),
+)
+
+This is called structured logging.
+
+Instead of one formatted string:
+
+[RequestID=8c3f1d4e] POST /books 201 4ms
+
+you produce structured fields:
+
+level=INFO
+request_id=8c3f1d4e
+method=POST
+path=/books
+status=201
+duration=4ms
+
+This format is much easier for log aggregation tools (like Elasticsearch, Loki, or Datadog) to search and filter, which is why it's commonly used in production Go services.
+
+
+
+
+
+
 
