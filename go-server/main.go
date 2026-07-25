@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bms2/internal/auth"
 	"bms2/internal/book"
 	"bms2/internal/config"
 	"bms2/internal/database"
@@ -43,6 +44,7 @@ func formHandler(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, "Hello %s, your email is %s", name, email)
 	}
 }
+
 func main() {
 	cfg, err := config.Load()
 	if err != nil {
@@ -59,12 +61,16 @@ func main() {
 	service := book.NewService(repo)
 	handler := book.NewHandler(service)
 
+	jwtManager := auth.NewJWTManager(cfg.JWTSecret)
+
 	router := http.NewServeMux()
 
 	book.RegisterRoutes(router, handler)
 
 	app := middleware.Chain(
 		router,
+		middleware.RequestID,
+		middleware.Authentication(jwtManager),
 		middleware.Logging,
 		middleware.Recovery,
 	)
@@ -73,6 +79,8 @@ func main() {
 		Addr:    ":" + cfg.Port,
 		Handler: app,
 	}
+
+	log.Printf("Server listening on :%s", cfg.Port)
 
 	log.Fatal(server.ListenAndServe())
 }

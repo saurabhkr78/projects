@@ -1,0 +1,57 @@
+package app
+
+import (
+	"book-api/internal/book"
+	"book-api/pkg/config"
+	"book-api/pkg/database"
+	"log"
+	"net/http"
+	"pgx"
+)
+
+type App struct {
+	server *http.Server
+	db     *pgx.DB
+}
+
+// New builds the entire application and returns it.
+func New() *App {
+
+	// Load configuration.
+	cfg, err := config.Load()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// Connect to the database.
+	db, err := database.Connect(cfg)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// Create application dependencies.
+	repo := book.NewRepository(db)
+	service := book.NewService(repo)
+	handler := book.NewHandler(service)
+
+	// Register routes.
+	router := http.NewServeMux()
+	book.RegisterRoutes(router, handler)
+
+	// Create HTTP server.
+	server := &http.Server{
+		Addr:    ":" + cfg.Port,
+		Handler: router,
+	}
+
+	return &App{
+		server: server,
+	}
+}
+
+// Run starts the HTTP server.
+func (a *App) Run() error {
+	log.Printf("Server listening on %s", a.server.Addr)
+
+	return a.server.ListenAndServe()
+}

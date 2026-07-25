@@ -5,7 +5,7 @@ import (
 	"encoding/hex"
 )
 
-func New() string {
+func GenerateNewId() string {
 	b := make([]byte, 16)
 
 	if _, err := rand.Read(b); err != nil {

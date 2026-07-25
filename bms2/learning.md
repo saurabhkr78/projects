@@ -5164,3 +5164,2245 @@ This format is much easier for log aggregation tools (like Elasticsearch, Loki, 
 
 
 
+# how request id is attached to the context as context.Context is immutable so logger can log the request id
+Step 0: The request arrives
+
+Go creates a request.
+
+Request
+│
+├── Method = POST
+├── URL = /books
+└── Context = context.Background()
+
+Imagine the context as an empty backpack.
+
+Request
+   │
+   ▼
+Context
+┌──────────────┐
+│              │
+│   Empty      │
+│              │
+└──────────────┘
+
+Now the request enters the first middleware.
+
+Step 1: RequestID middleware starts
+func RequestID(next http.Handler) http.Handler {
+
+We generate an ID.
+
+id := requestid.New()
+
+Suppose
+
+id = "ab82ef9137..."
+
+Now we have two things.
+
+Context (empty)
+
+RequestID
+
+ab82ef9137...
+
+But they are not connected yet.
+
+Step 2: IntoContext()
+
+Now we call
+
+ctx := requestid.IntoContext(
+    r.Context(),
+    id,
+)
+
+Internally
+
+func IntoContext(ctx context.Context, id string) context.Context {
+    return context.WithValue(ctx, key, id)
+}
+
+Now here's the MOST IMPORTANT PART.
+
+Does context.WithValue() modify the old context?
+
+NO
+
+It creates a new context.
+
+Think of it like this.
+
+Old context
+
+Context A
+
+(empty)
+
+After
+
+context.WithValue(...)
+
+Go creates
+
+Context B
+
+request_id = ab82ef9137...
+
+Notice
+
+Context A
+
+(empty)
+
+still exists.
+
+Nothing was modified.
+
+A new context was created.
+
+Step 3: r.WithContext()
+
+Now you have
+
+Old Request
+
+↓
+
+Context A
+
+and
+
+New Context
+
+↓
+
+Context B
+
+But the request still points to
+
+Context A
+
+So we do
+
+r = r.WithContext(ctx)
+
+Again
+
+Does this modify the request?
+
+No.
+
+It creates a new request.
+
+Before
+
+Request A
+
+↓
+
+Context A
+
+After
+
+Request B
+
+↓
+
+Context B
+
+Now the request carries the Request ID.
+
+Step 4: next.ServeHTTP()
+
+Now we call
+
+next.ServeHTTP(w, r)
+
+Notice carefully.
+
+Which request are we passing?
+
+Not
+
+Request A
+
+We pass
+
+Request B
+
+This request contains
+
+Context
+
+↓
+
+request_id = ab82ef9137...
+Step 5: Logging middleware
+
+Now Logging starts.
+
+func Logging(...)
+
+It receives
+
+Request B
+
+not Request A.
+
+Therefore
+
+requestid.FromContext(
+    r.Context(),
+)
+
+looks inside
+
+Context B
+
+and finds
+
+request_id
+
+↓
+
+ab82ef9137...
+
+Logging didn't generate it.
+
+Logging didn't store it.
+
+Logging simply reads it.
+
+Step 6: Logging logs it
+logger.Info(...)
+
+prints
+
+request_id=ab82ef9137...
+method=POST
+path=/books
+
+Then Logging calls
+
+next.ServeHTTP(...)
+Step 7: Router
+
+Router receives
+
+Request B
+
+The same request.
+
+Router doesn't create another request.
+
+It forwards it.
+
+Step 8: Handler
+
+Handler receives
+
+Request B
+
+Again
+
+requestid.FromContext(
+    r.Context(),
+)
+
+returns
+
+ab82ef9137...
+
+Exactly the same value.
+
+When a request reaches the server, Go creates an http.Request with a default context. The first middleware is RequestID. It generates a unique ID using crypto/rand, then calls context.WithValue() to create a new derived context containing the Request ID. Since contexts are immutable, the original context isn't modified. Next, r.WithContext(newCtx) creates a new request associated with the new context. This new request is passed to the next middleware via next.ServeHTTP(). The Logging middleware receives this updated request, extracts the Request ID using requestid.FromContext(), logs it along with other request details, and forwards the same request to the router. The router dispatches it to the matching handler, and because the same request object continues through the handler, service, and repository, all of them can access the same Request ID from the context. This is why context is commonly used to carry request-scoped metadata throughout the lifetime of an HTTP request.
+
+# Q. Why do we define a custom type for context keys instead of using a plain string?
+context.Context stores values as key-value pairs, where the key is of type any (interface{}).
+
+If we use a plain string as the key:
+
+ctx = context.WithValue(ctx, "request_id", id)
+
+another package might also use:
+
+ctx = context.WithValue(ctx, "request_id", somethingElse)
+
+Since both keys are of type string and have the same value ("request_id"), they collide.
+
+To prevent this, we define our own unexported named type:
+
+type contextKey string
+
+const requestIDKey contextKey = "request_id"
+
+Now the key is:
+
+Type  : contextKey
+Value : "request_id"
+
+instead of
+
+Type  : string
+Value : "request_id"
+
+Although the text is the same, the types are different, so Go treats them as different keys.
+
+This gives each package its own namespace for context keys and prevents accidental collisions between unrelated packages.
+
+Example
+
+❌ Unsafe
+
+ctx = context.WithValue(ctx, "user", user)
+
+Another package:
+
+ctx = context.WithValue(ctx, "user", logger)
+
+Both use the same key (string("user")), so they collide.
+
+✅ Safe
+
+type contextKey string
+
+const userKey contextKey = "user"
+
+ctx = context.WithValue(ctx, userKey, user)
+
+Another package's "user" key or even another contextKey type from a different package will not collide.
+
+We use a custom unexported type for context keys because context.Context compares keys by both type and value. A named type gives the package its own namespace, preventing collisions with keys from other packages that might use the same string.
+Context keys are identified by (type, value), not just by the string value.
+A custom named type provides package-level namespacing and prevents key collisions.
+
+
+# Why do we generate a Request ID?
+
+In a production system, thousands of HTTP requests are processed concurrently.
+
+Each incoming request is assigned a unique Request ID so that every log, error, trace, and downstream service call related to that request can be correlated.
+
+Example:
+
+Request 1 → RequestID = a1b2c3
+
+Request 2 → RequestID = x9y8z7
+
+Request 3 → RequestID = p4q5r6
+
+This makes debugging and distributed tracing possible.
+
+Why do we need requestIDKey?
+
+After generating the Request ID, we need to store it in the request's context so every middleware and handler processing that request can access it.
+
+ctx = context.WithValue(ctx, requestIDKey, requestID)
+
+Here:
+
+requestIDKey → the identifier (key)
+requestID    → the actual unique ID (value)
+
+Later:
+
+id := ctx.Value(requestIDKey)
+
+retrieves the same Request ID.
+
+Why is requestIDKey a custom type?
+
+The context is shared across all middleware and packages handling the same request.
+
+Many packages may store their own values in that shared context.
+
+If everyone used plain string keys like:
+
+"user"
+"request_id"
+"trace_id"
+
+different packages could accidentally use the same key, causing collisions.
+
+Therefore we define:
+
+type contextKey string
+
+const requestIDKey contextKey = "request_id"
+
+A custom named type creates a unique namespace for the package's keys, preventing accidental collisions.
+
+
+# authentication middlware
+Authentication middleware does one thing:
+
+Read JWT
+
+↓
+
+Validate JWT
+
+↓
+
+Extract User ID
+
+↓
+
+Put User ID into Context
+
+flow:
+Client
+
+Authorization: Bearer xxxxx
+
+        │
+        ▼
+
+Authentication Middleware
+
+        │
+
+Read Header
+
+        │
+
+Validate JWT
+
+        │
+
+Extract UserID
+
+        │
+
+IntoContext(userID)
+
+        │
+
+next.ServeHTTP()
+
+
+# What changes in Context?
+
+Before authentication
+
+Context
+
+request_id
+
+After authentication
+
+Context
+
+request_id
+
+user_id
+
+Later the handler simply reads
+
+requestID := requestid.FromContext(r.Context())
+
+userID := auth.FromContext(r.Context())
+
+Notice
+
+Handler doesn't know JWT exists.
+
+
+# notice
+requestid exposes:
+
+requestid.IntoContext()
+requestid.FromContext()
+
+The package owns everything related to Request IDs.
+
+auth exposes:
+
+auth.IntoContext()
+auth.FromContext()
+
+The package owns everything related to authenticated users.
+
+Notice that callers never touch the keys.
+
+That's encapsulation.
+
+
+# jwt 
+Think of a JWT as a Digital ID Card
+
+Suppose you work at Google.
+
+Your employee ID card says:
+
+----------------------------
+Google Employee Card
+
+ID      : 42
+Name    : Saurabh
+Role    : Backend Engineer
+Email   : saurabh@google.com
+Expires : 31 Dec 2026
+
+----------------------------
+
+Everything written inside the ID card is information about you.
+
+In JWT terminology, this information is called Claims.
+
+A JWT has three parts
+Header
+.
+Payload
+.
+Signature
+
+Example
+
+xxxxx.yyyyy.zzzzz
+
+The middle part (Payload) contains the claims.
+
+Payload (Claims)
+
+After decoding the payload, it may look like this:
+
+{
+    "user_id": "42",
+    "email": "saurabh@gmail.com",
+    "role": "admin",
+    "exp": 1753330000,
+    "iat": 1753320000
+}
+
+Everything inside this JSON is called Claims.
+
+Think of it as:
+
+JWT
+
+↓
+
+Payload
+
+↓
+
+Claims
+There are two kinds of Claims
+1. Standard Claims
+
+These are defined by the JWT specification.
+
+Examples:
+
+{
+    "exp": 1753330000,
+    "iat": 1753320000,
+    "iss": "my-api",
+    "sub": "42"
+}
+
+Meaning:
+
+exp → Expiration Time
+iat → Issued At
+iss → Issuer
+sub → Subject (usually user ID)
+
+These are understood by JWT libraries.
+
+2. Custom Claims
+
+These are created by your application.
+
+Example:
+
+{
+    "user_id":"42",
+    "email":"abc@gmail.com",
+    "role":"admin"
+}
+
+JWT doesn't know what these mean.
+
+They're meaningful only to your application.
+
+That's why we created
+type Claims struct {
+	UserID string `json:"user_id"`
+	Email  string `json:"email"`
+	Role   string `json:"role"`
+
+	jwt.RegisteredClaims
+}
+
+Notice two things.
+
+Your custom claims
+UserID
+Email
+Role
+
+These become
+
+{
+    "user_id":"42",
+    "email":"abc@gmail.com",
+    "role":"admin"
+}
+Standard claims
+jwt.RegisteredClaims
+
+This gives you fields like
+
+ExpiresAt
+IssuedAt
+Issuer
+Subject
+
+which become
+
+{
+    "exp": ...,
+    "iat": ...
+}
+
+Suppose we create a token for you.
+
+Claims object
+
+Claims{
+    UserID: "42",
+    Email: "saurabh@gmail.com",
+    Role: "admin",
+
+    RegisteredClaims: jwt.RegisteredClaims{
+        ExpiresAt: ...
+        IssuedAt: ...
+    },
+}
+
+This becomes
+
+{
+    "user_id":"42",
+    "email":"saurabh@gmail.com",
+    "role":"admin",
+
+    "exp":1753330000,
+    "iat":1753320000
+}
+
+Then the JWT library
+
+Signs
+↓
+
+Encodes
+
+↓
+
+Creates Token
+
+which finally looks like
+
+eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9
+.
+eyJ1c2VyX2lkIjoiNDIiLCJyb2xlIjoiYWRtaW4i...
+.
+lQmH3Lk...
+
+
+# Why do we parse Claims later?
+
+Suppose a client sends
+
+Authorization: Bearer eyJhbGc...
+
+Your middleware validates the signature.
+
+Then it extracts the payload.
+
+That payload becomes
+
+Claims{
+    UserID:"42",
+    Email:"abc@gmail.com",
+    Role:"admin",
+}
+
+Finally, you convert it into your domain model:
+
+return User{
+	ID:    claims.UserID,
+	Email: claims.Email,
+	Role:  claims.Role,
+}, nil
+
+Now the rest of your application doesn't care about JWT anymore—it just works with a User.
+
+One important design insight
+
+Notice how Claims and User are different types, even though they have similar fields.
+
+type Claims struct {
+	UserID string
+	Email  string
+	Role   string
+	jwt.RegisteredClaims
+}
+
+type User struct {
+	ID    string
+	Email string
+	Role  string
+}
+
+That's intentional.
+
+Claims represents how user information is stored inside a JWT (transport format).
+User represents how your application models an authenticated user (domain model).
+
+Separating these types means that if the JWT format changes—for example, you add tenant_id or change claim names—you only update the mapping in jwt.go. The rest of your handlers, services, and repositories continue working with the same User type. This separation of transport models from domain models is a common production design pattern.
+
+
+# jwt sentinel errors
+Authentication Flow
+Client
+    │
+    ▼
+Authorization: Bearer eyJhbGc...
+
+    │
+    ▼
+Authentication Middleware
+
+    │
+    ▼
+Extract Token
+
+    │
+    ▼
+Validate JWT
+
+    │
+    ├──────────────► Is token malformed?
+    │                    │
+    │                    ▼
+    │              ErrMalformedToken
+    │
+    ├──────────────► Is signature valid?
+    │                    │
+    │                    ▼
+    │              ErrInvalidToken
+    │
+    ├──────────────► Is token expired?
+    │                    │
+    │                    ▼
+    │              ErrExpiredToken
+    │
+    ├──────────────► Are required claims present?
+    │                    │
+    │                    ▼
+    │              ErrMissingClaims
+    │
+    ▼
+User
+
+Now let's understand each one.
+
+1. ErrMalformedToken
+ErrMalformedToken = errors.New("malformed token")
+When does this happen?
+
+The client sends something that isn't a JWT.
+
+Example:
+
+Authorization: Bearer hello
+
+or
+
+Authorization: Bearer 12345
+
+A JWT has three parts:
+
+xxxxx.yyyyy.zzzzz
+
+(header.payload.signature)
+
+Suppose the client sends
+
+abc
+
+There are no dots.
+
+The JWT library can't even parse it.
+
+It immediately fails.
+
+JWT Parser
+     │
+     ▼
+
+abc
+
+↓
+
+❌ Not a JWT
+
+↓
+
+ErrMalformedToken
+2. ErrInvalidToken
+ErrInvalidToken = errors.New("invalid token")
+
+Now suppose the token looks valid.
+
+xxxxx.yyyyy.zzzzz
+
+But someone changed the payload.
+
+Example
+
+Original token
+
+role=user
+
+Attacker edits it to
+
+role=admin
+
+without knowing your secret key.
+
+Now the signature no longer matches.
+
+The server calculates
+
+Expected Signature
+
+↓
+
+abc123
+
+Received
+
+xyz999
+
+Mismatch.
+
+JWT
+
+↓
+
+Signature Verification
+
+↓
+
+❌
+
+↓
+
+ErrInvalidToken
+
+This is probably the most common authentication failure.
+
+3. ErrExpiredToken
+
+Every JWT usually contains
+
+{
+  "exp": 1753320000
+}
+
+Meaning
+
+This token expires at 10:30 AM.
+
+Suppose
+
+Current time
+
+11:45 AM
+
+The library checks
+
+Now > exp ?
+
+↓
+
+YES
+
+↓
+
+Expired
+
+Return
+
+ErrExpiredToken
+4. ErrMissingClaims
+
+Suppose your application requires
+
+{
+    "user_id": "...",
+    "email": "...",
+    "role": "..."
+}
+
+But someone sends
+
+{
+    "email":"abc@gmail.com"
+}
+
+No
+
+user_id
+
+Or
+
+role
+
+exists.
+
+The token is correctly signed.
+
+The signature is valid.
+
+The token isn't expired.
+
+But your application cannot authenticate the user because required information is missing.
+
+So
+
+Claims
+
+↓
+
+Missing user_id
+
+↓
+
+ErrMissingClaims
+Where do these errors come from in code?
+
+Imagine this.
+
+func (j *JWT) ValidateToken(token string) (User, error) {
+
+    parsedToken, err := jwt.ParseWithClaims(...)
+
+First possibility
+
+if err != nil {
+
+    if errors.Is(err, jwt.ErrTokenMalformed) {
+        return User{}, ErrMalformedToken
+    }
+
+    if errors.Is(err, jwt.ErrTokenExpired) {
+        return User{}, ErrExpiredToken
+    }
+
+    return User{}, ErrInvalidToken
+}
+
+Now parsing succeeded.
+
+We extract claims.
+
+claims := parsedToken.Claims.(*Claims)
+
+Suppose
+
+claims.UserID == ""
+
+Then
+
+return User{}, ErrMissingClaims
+
+Otherwise
+
+return User{
+    ID: claims.UserID,
+    Email: claims.Email,
+    Role: claims.Role,
+}, nil
+
+# the concept of sentinel errors
+A sentinel error is a predefined, reusable error value that represents a specific condition. Instead of creating a new error every time, you define it once and compare against it later.
+In Go, it's usually created like this:
+
+var ErrNotFound = errors.New("not found")
+
+Then anywhere in your code, you return that exact error:
+
+func FindUser(id int) error {
+    if id != 1 {
+        return ErrNotFound
+    }
+    return nil
+}
+
+And the caller checks it:
+
+err := FindUser(2)
+
+if errors.Is(err, ErrNotFound) {
+    fmt.Println("User doesn't exist")
+}
+Whenever the "user not found" situation happens, the function returns thesame error value. that's why it's called sentinel
+Without a sentinel error
+
+Imagine writing:
+
+func FindUser(id int) error {
+    if id != 1 {
+        return errors.New("user not found")
+    }
+    return nil
+}
+
+Now every call creates a new error object.
+
+Call 1
+errors.New("user not found")
+      ↓
+Address A
+
+Call 2
+errors.New("user not found")
+      ↓
+Address B
+
+If you compare them:
+
+err == errors.New("user not found")
+
+it will be false because they're different error values.
+
+With a sentinel error
+var ErrUserNotFound = errors.New("user not found")
+
+func FindUser(id int) error {
+    if id != 1 {
+        return ErrUserNotFound
+    }
+    return nil
+}
+
+Now every failure returns the same error variable.
+
+Call 1 ───────► ErrUserNotFound
+
+Call 2 ───────► ErrUserNotFound
+
+Call 3 ───────► ErrUserNotFound
+
+So checking becomes reliable.
+
+
+
+In your JWT project
+
+You recently defined:
+
+var (
+    ErrInvalidToken   = errors.New("invalid token")
+    ErrExpiredToken   = errors.New("token expired")
+    ErrMalformedToken = errors.New("malformed token")
+    ErrMissingClaims  = errors.New("missing claims")
+)
+
+These are sentinel errors.
+
+Your parser can return them:
+
+return ErrExpiredToken
+
+or wrap them:
+
+return fmt.Errorf("parse jwt: %w", ErrExpiredToken)
+
+And callers can reliably check:
+
+switch {
+case errors.Is(err, ErrExpiredToken):
+    // Tell client the token has expired
+
+case errors.Is(err, ErrInvalidToken):
+    // Tell client the token is invalid
+
+case errors.Is(err, ErrMalformedToken):
+    // Tell client the JWT format is incorrect
+
+default:
+    // Internal server error
+}
+
+# Why use errors.Is instead of ==?
+
+Imagine you have a person
+
+His name is John.
+
+var John = Person{Name: "John"}
+
+Now suppose I give you John.
+
+John
+ ▲
+ │
+person
+
+If I ask,
+
+Is person == John?
+
+Answer:
+
+YES
+
+Because it's the same person.
+
+Now imagine I put John inside a car.
++-----------+
+|   CAR     |
+|           |
+|  John     |
++-----------+
+
+Now the variable points to the car.
+
+person
+   │
+   ▼
++-----------+
+| CAR        |
+|            |
+| John       |
++-----------+
+
+If I ask
+
+Is the car == John?
+
+NO
+
+Because a car is not John.
+
+John is inside the car.
+
+This is exactly what %w does.
+
+Without %w
+return ErrUserNotFound
+err
+ │
+ ▼
+
+ErrUserNotFound
+
+Both point to the same thing.
+
+So
+
+err == ErrUserNotFound
+
+✅ True
+
+With %w
+return fmt.Errorf("find user 42: %w", ErrUserNotFound)
+
+Go creates a new error.
+
+err
+ │
+ ▼
+
++--------------------------------+
+| find user 42:                  |
+|                                |
+| ErrUserNotFound                |
++--------------------------------+
+
+Notice
+
+err is NOT ErrUserNotFound.
+
+It is a new error that contains ErrUserNotFound.
+
+So why is == false?
+
+Because you're comparing
+
+Wrapper Error
+
+with
+
+ErrUserNotFound
+
+Like comparing
+
+Car
+==
+John
+
+Are they the same object?
+
+NO
+Then what does errors.Is do?
+
+errors.Is is like asking
+
+"Is John inside this car?"
+
+It opens the car.
+
+Car
+
+↓
+
+Open it
+
+↓
+
+John
+
+Finds John.
+
+Returns
+
+true
+Let's use your JWT example.
+
+You have
+
+var ErrExpiredToken = errors.New("token expired")
+
+Later you write
+
+return fmt.Errorf("parse jwt failed: %w", ErrExpiredToken)
+
+The returned error becomes
+
+parse jwt failed: token expired
+
+But internally it looks like
+
++------------------------------------+
+| parse jwt failed                   |
+|                                    |
+| contains                           |
+|                                    |
+| ErrExpiredToken                    |
++------------------------------------+
+
+Now look carefully.
+
+Using ==
+err == ErrExpiredToken
+
+Go asks
+
+Is this big box exactly ErrExpiredToken?
+
+Answer:
+
+NO
+Using errors.Is
+errors.Is(err, ErrExpiredToken)
+
+Go asks
+
+Does this box contain ErrExpiredToken?
+
+It opens the box.
+
+Box
+
+↓
+
+ErrExpiredToken
+
+↓
+
+Found
+
+↓
+
+true
+The only thing I want you to remember is this:
+
+== checks:
+
+"Are these exactly the same error object?"
+
+errors.Is() checks:
+
+"Is this error, or anything wrapped inside it, the error I'm looking for?"
+
+
+
+# how authentication works
+1. claims.go
+Responsibility
+
+Define what information is stored inside the JWT.
+
+type Claims struct {
+    UserID string
+    Email  string
+    Role   string
+
+    jwt.RegisteredClaims
+}
+
+Think of a passport.
+
+A passport contains
+
+Name
+Nationality
+Passport Number
+Expiry
+
+Similarly, a JWT contains
+
+UserID
+Email
+Role
+Expiry
+IssuedAt
+Issuer
+
+This file only defines the structure.
+
+It doesn't create tokens.
+
+It doesn't validate them.
+
+It doesn't know HTTP.
+
+Just a data model.
+
+2. errors.go
+Responsibility
+
+Defines authentication errors.
+
+ErrExpiredToken
+ErrInvalidToken
+ErrMalformedToken
+ErrMissingClaims
+
+Think of airport security.
+
+Instead of saying
+
+Something went wrong
+
+they give precise reasons
+
+Passport expired
+
+Passport damaged
+
+Passport fake
+
+Those are your sentinel errors.
+
+Every other file understands these errors.
+
+3. user.go
+
+Responsibility
+
+Represents the authenticated user inside your application.
+
+type User struct {
+    ID
+    Email
+    Role
+}
+
+Notice
+
+It has NO
+
+ExpiresAt
+
+IssuedAt
+
+Issuer
+
+Why?
+
+Because after authentication, your application doesn't care about JWT metadata.
+
+It only cares about
+
+Who is the user?
+4. context.go
+
+Responsibility
+
+Store and retrieve the authenticated user from the request context.
+
+IntoContext()
+
+FromContext()
+
+Think of this as attaching an ID badge to the request.
+
+Incoming Request
+
+↓
+
+Authenticate
+
+↓
+
+Attach User Badge
+
+↓
+
+Pass request forward
+
+Later,
+
+Any handler can simply do
+
+user, ok := auth.FromContext(ctx)
+
+without knowing anything about JWT.
+
+5. jwt.go
+
+This is the engine.
+
+Responsibility
+
+Manage JWT lifecycle.
+
+It does
+
+GenerateToken()
+
+ValidateToken()
+
+This file knows
+
+JWT library
+Signing method
+Secret
+Expiry
+Claims
+
+It DOES NOT know
+
+HTTP
+Context
+Middleware
+Handlers
+GenerateToken()
+
+Input
+
+User
+
+↓
+
+Creates
+
+Claims
+
+↓
+
+Creates
+
+JWT
+
+↓
+
+Signs it
+
+↓
+
+Returns
+
+Token String
+
+Flow
+
+User
+
+↓
+
+Claims
+
+↓
+
+JWT
+
+↓
+
+Signed Token
+ValidateToken()
+
+Input
+
+JWT String
+
+↓
+
+Verify signature
+
+↓
+
+Check expiry
+
+↓
+
+Decode payload
+
+↓
+
+Return Claims
+
+Token
+
+↓
+
+Claims
+
+Nothing else.
+
+6. authentication.go
+
+This is the security guard.
+
+Its responsibility is
+
+Authenticate every incoming request.
+
+It does NOT know
+
+how JWT is created
+how signature works
+
+It only knows
+
+I have a token.
+
+Ask JWTManager to validate it.
+Complete Data Flow
+
+Suppose a user logs in.
+
+Step 1
+
+User logs in.
+
+POST /login
+
+Backend verifies
+
+Email
+
+Password
+Step 2
+
+Backend creates
+
+user := auth.User{
+    ID: "123",
+    Email: "abc@gmail.com",
+    Role: "admin",
+}
+Step 3
+
+JWT Manager
+
+GenerateToken(user)
+
+takes
+
+User
+
+↓
+
+creates
+
+Claims
+
+↓
+
+creates JWT
+
+↓
+
+returns
+
+eyJhbGc...
+
+Send to client.
+
+Now imagine another request.
+
+Client sends
+
+GET /books
+
+Authorization:
+Bearer eyJhbGc...
+Authentication Middleware
+
+Reads
+
+Authorization Header
+
+↓
+
+Extracts
+
+eyJhbGc...
+
+↓
+
+Calls
+
+ValidateToken()
+JWT Manager
+
+Receives
+
+eyJhbGc...
+
+↓
+
+Verifies signature
+
+↓
+
+Checks expiry
+
+↓
+
+Parses payload
+
+↓
+
+Returns
+
+Claims
+
+Middleware now has
+
+Claims
+UserID
+
+Email
+
+Role
+
+Expiry
+
+Middleware converts
+
+Claims
+
+↓
+
+User
+
+because handlers don't need
+
+Expiry
+
+Issuer
+
+IssuedAt
+
+Only
+
+ID
+
+Email
+
+Role
+
+Middleware stores
+
+User
+
+inside
+
+Context
+Context
+
+↓
+
+User
+
+Finally
+
+next.ServeHTTP()
+
+is called.
+
+Handler
+
+Handler simply writes
+
+user, ok := auth.FromContext(r.Context())
+
+It immediately gets
+
+ID
+
+Email
+
+Role
+
+without parsing JWT again.
+
+End-to-End Flow Diagram
+                  LOGIN
+                    │
+                    ▼
+              Verify Credentials
+                    │
+                    ▼
+                 auth.User
+                    │
+                    ▼
+           JWTManager.GenerateToken()
+                    │
+                    ▼
+                 Claims
+                    │
+                    ▼
+               Signed JWT Token
+                    │
+             ───── Client ─────
+                    │
+                    ▼
+         Authorization: Bearer <token>
+                    │
+                    ▼
+     Authentication Middleware
+                    │
+                    ▼
+     JWTManager.ValidateToken()
+                    │
+                    ▼
+                 Claims
+                    │
+                    ▼
+          Convert Claims → User
+                    │
+                    ▼
+      auth.IntoContext(ctx, user)
+                    │
+                    ▼
+            next.ServeHTTP()
+                    │
+                    ▼
+                 Handler
+                    │
+                    ▼
+auth.FromContext(r.Context()) → User
+Why this design scales well
+
+Each file answers exactly one question:
+
+File	Responsibility	Input	Output
+claims.go	What data goes inside a JWT?	—	Claims type
+errors.go	Which auth errors exist?	—	Sentinel errors
+user.go	What is an authenticated user?	—	User type
+context.go	How do we carry the authenticated user through the request?	User, context.Context	Updated context or retrieved User
+jwt.go	How do we create and validate JWTs?	User or token string	Signed token or Claims
+authentication.go	How do we protect HTTP endpoints?	HTTP request	Authenticated request with User in context
+
+Notice how the data transforms as it moves through the system:
+
+User (application model)
+        │
+        ▼
+Claims (JWT payload)
+        │
+        ▼
+JWT Token (serialized string)
+        │
+        ▼
+Claims (decoded after validation)
+        │
+        ▼
+User (application model again)
+        │
+        ▼
+Context
+        │
+        ▼
+Handlers
+
+That's the key architectural idea: JWT is only a transport format for identity. The rest of your application works with User, not with JWT internals.
+
+# bootstraping and dependency injection (composition root)
+
+"How do I assemble an application?"
+
+That process is called the Composition Root (also known as the Bootstrap Layer).
+
+Let's start with your current main.go
+
+Right now, your main.go does this:
+
+Load Config
+      │
+      ▼
+Connect Database
+      │
+      ▼
+Create Repository
+      │
+      ▼
+Create Service
+      │
+      ▼
+Create Handler
+      │
+      ▼
+Create JWTManager
+      │
+      ▼
+Create Router
+      │
+      ▼
+Register Routes
+      │
+      ▼
+Apply Middleware
+      │
+      ▼
+Start HTTP Server
+
+Notice something?
+
+It isn't doing business logic.
+
+It's just connecting objects together.
+
+This is called composition.
+
+What is Composition?
+
+Imagine you're building a gaming PC.
+
+You buy:
+
+CPU
+Motherboard
+RAM
+SSD
+GPU
+Power Supply
+
+Each component works independently.
+
+Then you assemble them.
+
+That assembly process is composition.
+
+Your application is exactly the same.
+
+You have:
+
+Config
+Database
+Repository
+Service
+Handler
+JWTManager
+Router
+Middleware
+Server
+
+Individually they're useless.
+
+When connected together,
+
+they become an application.
+
+Composition Root
+
+The place where everything is assembled is called the Composition Root.
+
+In small Go applications,
+
+it's usually
+
+main.go
+
+because everything is wired there.
+
+Dependency Graph
+
+Every object depends on another object.
+
+Example
+
+Repository
+    ▲
+    │
+Database
+
+Service depends on Repository.
+
+Service
+    ▲
+    │
+Repository
+
+Handler depends on Service.
+
+Handler
+    ▲
+    │
+Service
+
+Authentication Middleware depends on JWTManager.
+
+Authentication
+      ▲
+      │
+ JWTManager
+
+Server depends on Router.
+
+Server
+    ▲
+    │
+Router
+
+Together
+
+Server
+   ▲
+Router
+   ▲
+Handler
+   ▲
+Service
+   ▲
+Repository
+   ▲
+Database
+
+This is called the dependency graph.
+
+Dependency Injection
+
+Notice something.
+
+Repository isn't creating Database.
+
+Instead
+
+main.go creates Database.
+
+Then
+
+repo := NewRepository(db)
+
+Database is injected.
+
+Likewise
+
+service := NewService(repo)
+
+Repository is injected.
+
+Likewise
+
+handler := NewHandler(service)
+
+Service is injected.
+
+Nothing creates its own dependencies.
+
+That's Dependency Injection.
+
+Why?
+
+Imagine Repository did this.
+
+func NewRepository() *Repository {
+
+    db := database.Connect()
+
+    return &Repository{
+        db: db,
+    }
+}
+
+Now Repository is tightly coupled to Database.
+
+You can't
+
+mock database
+replace postgres
+test repository
+
+Everything becomes difficult.
+
+Instead
+
+repo := NewRepository(db)
+
+Repository doesn't care where db came from.
+
+That's inversion of control.
+
+Why does main.go become huge?
+
+Suppose your application grows.
+
+Today
+
+Book
+
+Tomorrow
+
+Book
+User
+Order
+Payment
+Inventory
+Notification
+Analytics
+Search
+
+Each has
+
+Repository
+
+Service
+
+Handler
+
+Now main.go becomes
+
+bookRepo := ...
+bookService := ...
+bookHandler := ...
+
+userRepo := ...
+userService := ...
+userHandler := ...
+
+orderRepo := ...
+orderService := ...
+orderHandler := ...
+
+paymentRepo := ...
+paymentService := ...
+paymentHandler := ...
+
+300+ lines.
+
+Nothing wrong.
+
+Just noisy.
+
+Solution
+
+Move composition into another package.
+
+Example
+
+cmd/
+    api/
+        main.go
+
+internal/
+    app/
+        app.go
+app.go
+
+This becomes the new composition root.
+
+func New() *App {
+
+    cfg := ...
+
+    db := ...
+
+    repo := ...
+
+    service := ...
+
+    handler := ...
+
+    router := ...
+
+    server := ...
+
+    return &App{
+        server: server,
+    }
+}
+main.go
+
+Now becomes
+
+func main() {
+
+    app := app.New()
+
+    log.Fatal(app.Run())
+}
+
+Beautiful.
+
+This is called Bootstrapping
+
+The process
+
+Create Config
+
+↓
+
+Create Database
+
+↓
+
+Create Dependencies
+
+↓
+
+Create Server
+
+↓
+
+Run
+
+is called
+
+Application Bootstrapping.
+
+Why "Composition Root"?
+
+Because
+
+all dependencies meet here.
+
+Nothing else creates dependencies.
+
+Everything starts here.
+
+Think of a tree.
+
+                 main.go
+                     │
+      ┌──────────────┼──────────────┐
+      ▼              ▼              ▼
+   Config         Database     JWTManager
+                     │
+                     ▼
+               Repository
+                     │
+                     ▼
+                 Service
+                     │
+                     ▼
+                 Handler
+                     │
+                     ▼
+                  Router
+                     │
+                     ▼
+                 Middleware
+                     │
+                     ▼
+                   Server
+
+Everything originates from one root.
+
+Hence
+
+Composition Root.
+
+Why do big companies care?
+
+Imagine a service at companies like Stripe, Uber, or Netflix.
+
+Instead of 8 objects,
+
+they may have hundreds:
+
+Database connections
+Redis clients
+Kafka producers
+Kafka consumers
+S3 clients
+JWT manager
+Metrics
+Tracing
+Logger
+Feature flags
+Cache
+Mailer
+Search client
+Payment gateway
+External APIs
+
+All of these need to be created in the right order and passed to the components that depend on them. Keeping that wiring in one place—the composition root—makes it much easier to understand how the application is assembled, swap implementations for testing, and avoid hidden dependencies.
+
+A subtle but important rule
+
+The composition root knows about everything.
+
+Your main.go (or app.New()) is allowed to import:
+
+config
+database
+book
+auth
+middleware
+
+But the reverse should not happen.
+
+For example:
+
+book/service should not import main.
+repository should not create its own database connection.
+middleware should not call config.Load() by itself.
+
+This keeps dependencies flowing in one direction:
+
+Composition Root
+        │
+        ▼
+ Infrastructure (DB, Config, Logger)
+        │
+        ▼
+ Repository
+        │
+        ▼
+ Service
+        │
+        ▼
+ Handler
+        │
+        ▼
+ HTTP Server
+
+Each layer receives what it needs from above instead of reaching out to build its own dependencies. That's one of the foundations of maintainable Go applications and a pattern you'll encounter repeatedly in production codebases.
+
+
