@@ -8139,3 +8139,226 @@ Needs restart policy
 Now translate those decisions into YAML.
 
 ```
+
+Note:3–5 stages → Larger production systems that separate dependency installation, compilation, testing, asset generation, security scanning, and packaging.
+
+
+How Docker Knows the Stages
+
+Docker simply counts the FROM instructions.
+
+FROM golang:1.25 AS builder
+
+Stage 1
+
+FROM builder AS tester
+
+Stage 2
+
+FROM alpine
+
+Stage 3
+
+Every FROM starts a new stage with a new filesystem.
+
+Can a Stage Copy from Any Previous Stage?
+
+Yes.
+
+Suppose you have
+
+FROM golang:1.25 AS dependencies
+
+FROM dependencies AS builder
+
+FROM builder AS tester
+
+FROM alpine
+
+The runtime stage can do
+
+COPY --from=builder /app/server .
+
+or
+
+COPY --from=tester /app/server .
+
+or
+
+COPY --from=dependencies ...
+
+as long as that file exists in the referenced stage.
+
+### Multi-stage builds reduce image size because the final image contains only the files required to run the application, while all build tools, source code, caches, and compilers remain behind in earlier build stages and are not included in the final image.
+
+
+# linux command and flags
+COMMAND [OPTIONS] [ARGUMENTS]
+
+e.g docker run -d -p 8080:8080 nginx
+docker
+│
+└── Command Group
+
+run
+│
+└── Action
+
+-d
+-p
+│
+└── Options (Flags)
+
+8080:8080
+nginx
+│
+└── Arguments
+
+
+
+1. Help & Information
+Short	Long	Meaning	Example
+-h	--help	Show help	docker --help
+-v	--version	Show version (many tools)	go version / terraform version
+--version	--version	Show version	docker --version
+2. Verbose / Quiet
+Short	Long	Meaning
+-v	--verbose	Print more information
+-q	--quiet	Print less information
+-s	--silent	Silent mode
+
+Examples
+
+curl -s
+go test -v
+docker images -q
+3. Input / Output
+Short	Long	Meaning
+-i	--input (varies)	Input
+-o	--output	Output file
+-f	--file	File to use
+
+Examples
+
+go build -o app
+
+docker build -f Dockerfile.dev .
+
+kubectl apply -f deployment.yaml
+4. Files & Directories
+Short	Long	Meaning
+-r	--recursive	Recurse directories
+-R	--recursive	Recursive (some commands)
+-a	--all	Include all files/items
+-l	—	Long listing
+-h	--human-readable	Human-readable sizes
+
+Examples
+
+ls -lah
+
+cp -r folder newfolder
+
+rm -r temp
+5. Networking
+Short	Long	Meaning
+-p	--publish	Publish port
+-P	—	Publish all exposed ports
+-H	--host	Host
+--network	--network	Docker network
+
+Examples
+
+docker run -p 8080:80 nginx
+
+docker run --network backend app
+6. Environment
+Short	Long	Meaning
+-e	--env	Environment variable
+--env-file	--env-file	Read env file
+
+Examples
+
+docker run -e DB_HOST=postgres
+
+docker run --env-file .env
+7. Volumes / Storage
+Short	Long	Meaning
+-v	--volume	Mount volume
+--mount	--mount	Advanced mount syntax
+8. Container Lifecycle
+Short	Long	Meaning
+-d	--detach	Background mode
+-i	—	Keep STDIN open
+-t	—	Allocate terminal
+--rm	--rm	Auto-remove
+--name	--name	Container name
+--restart	--restart	Restart policy
+
+Example
+
+docker run -dit --name api nginx
+9. Image Building
+Short	Long	Meaning
+-t	--tag	Image tag
+-f	--file	Dockerfile path
+--target	--target	Build specific stage
+--build-arg	--build-arg	Build argument
+--no-cache	--no-cache	Disable cache
+10. Search / Filter
+Short	Long	Meaning
+-n	--name (varies)	Name
+--filter	--filter	Filter results
+-g	--grep (varies)	Search
+
+Examples
+
+docker ps --filter name=api
+
+grep -n hello file.txt
+11. Force / Safety
+Short	Long	Meaning
+-f	--force	Force operation
+-y	--yes	Assume yes
+--dry-run	--dry-run	Simulate only
+
+Examples
+
+rm -f file
+
+apt install -y nginx
+
+kubectl apply --dry-run=client
+12. Authentication
+Short	Long	Meaning
+-u	--user	Username/User
+-p	--password (some tools)	Password
+--token	--token	Access token
+13. Kubernetes
+Short	Long	Meaning
+-n	--namespace	Namespace
+-A	--all-namespaces	All namespaces
+-o	--output	Output format
+-f	--filename	Manifest file
+14. Git
+Short	Long	Meaning
+-m	--message	Commit message
+-a	--all	Stage all tracked files
+-b	--branch	Branch
+--amend	--amend	Modify last commit
+15. Go
+Short	Long	Meaning
+-o	—	Output binary
+-v	—	Verbose
+-race	—	Race detector
+-cover	—	Coverage
+-run	—	Run matching tests
+One thing to remember
+
+Notice something:
+
+Flag	Different meanings
+-t	Tag (Docker build), TTY (Docker run)
+-v	Volume (Docker), Verbose (Go), Version (some tools), Human-readable in ls -lh when combined with -h
+-p	Publish (Docker), Password (some commands), Port (many networking tools)
+-f	File (Docker, kubectl), Force (rm), Filename (many tools)
