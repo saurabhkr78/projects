@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"bms2/internal/auth"
-	"bms2/internal/httphelper"
+	httphelper "bms2/internal/httphelper"
 )
 
 func Authentication(jwt *auth.JWTManager) Middleware {

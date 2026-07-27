@@ -1,7 +1,7 @@
 package main
 
 import (
-	"book-api/internal/app"
+	"bms2/internal/app"
 	"log"
 )
 

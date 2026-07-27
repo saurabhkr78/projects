@@ -1,17 +1,16 @@
 package app
 
 import (
-	"book-api/internal/book"
-	"book-api/pkg/config"
-	"book-api/pkg/database"
+	"bms2/internal/book"
+	"bms2/pkg/config"
+	"bms2/pkg/database"
 	"log"
 	"net/http"
-	"pgx"
 )
 
 type App struct {
 	server *http.Server
-	db     *pgx.DB
+	db     *database.DB
 }
 
 // New builds the entire application and returns it.
