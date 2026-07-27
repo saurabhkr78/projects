@@ -7763,12 +7763,151 @@ ports:
   - "8080:8080"
 
 # how do services find each other?
-So how does the app find PostgreSQL?Docker automatically gives every service a DNS name.
+So how does the app find PostgreSQL?
+Docker automatically gives every service a DNS name.
+Docker Starts a DNS Server
 
+When you run
+
+docker compose up
+
+Docker does several things automatically.
+
+Create Network
+
+↓
+
+Start DNS Server
+
+↓
+
+Start Containers
+
+↓
+
+Register Every Service
+
+Notice the important step.
+
+Register Every Service
+Suppose your compose file is
+services:
+
+  app:
+
+  postgres:
+
+  redis:
+
+Docker internally creates something like
+
+Docker DNS
+
+postgres
+
+↓
+
+172.20.0.2
+
+
+redis
+
+↓
+
+172.20.0.3
+
+
+app
+
+↓
+
+172.20.0.4
+
+You never see this.
+
+Docker does it automatically.
+
+
+So how does the Go app connect?
+
+Your compose file
+
+services:
+
+  app:
+
+    environment:
+
+      DB_HOST: postgres
+
+Inside Go
+
+host := os.Getenv("DB_HOST")
+
+returns
+
+postgres
+
+Now Go tries to connect.
+
+postgres:5432
+
+Question
+
+How does it become an IP?
+
+Here's the Hidden Step
+Go Application
+
+↓
+
+Connect to
+
+postgres:5432
+
+↓
+
+Linux asks
+
+"Who is postgres?"
+
+↓
+
+Docker DNS
+
+↓
+
+postgres
+
+↓
+
+172.20.0.2
+
+↓
+
+TCP Connection
+
+↓
+
+PostgreSQL
+
+The application never knows the IP.
+
+It only knows
+
+postgres
+
+Docker handles the translation.
+
+### In Docker Compose, the service name becomes the hostname. Docker's built-in DNS automatically resolves that hostname to the correct container IP, so containers communicate using service names instead of hardcoded IP addresses.
+
+That's why in production Go code you'll often see connection strings like:
+
+connStr := "host=postgres port=5432 user=postgres password=secret dbname=app sslmode=disable"
 
 
 # should data survive?
-suppose we do docker compose down mean database disappears
+suppose we do docker compose down/docker rm postgres mean database container disappears
 customer data lost
 
 so ask which services have important data?
@@ -7777,5 +7916,226 @@ redis
 mongodb
 sql
 kafka
-the services have important data need persitance volume for data persistance and volume to give data a space to live permanently
+the services have important data need persitance volume for data persistance and volume to give data a space to live permanently.
+so where do the data lives ? outside the container in persistent storage(database files)
 
+<Named docker Volume> : <Directory Inside Container>
+
+Docker-managed storage:Location inside container
+
+e.g - postgres-data:/var/lib/postgresql/data
+
+## the docker manages volumes seperately from containers
+## PostgreSQL stores all its database files here "/var/lib/postgresql/data"
+
+so 
+volumes:
+- postgres-data:/var/lib/postgresql/data
+
+
+# now we have starts the services
+Which services must start first?
+if your 
+Your API starts.
+Database isn't ready.
+Application crashes.
+
+so we start dependency of api/app first then api/app.
+like here postgres then redis and likewise
+
+# how do services communicate?
+compose create networks
+
+We have multiple isolated containers.
+Every container has its own localhost.
+If your Go application does
+
+localhost:5432
+
+What happens?
+
+It searches inside its own container. and postgres not found 
+Because PostgreSQL is in another container.
+
+so containers need addresses
+Docker automatically creates a private network.
+Every container gets its own IP address.
+Docker includes a DNS server.
+
+Suppose your compose file says
+
+services:
+
+  postgres:
+
+  redis:
+
+  app:
+
+Docker automatically creates DNS records.
+
+postgres
+
+↓
+
+172.18.0.3
+
+redis
+
+↓
+
+172.18.0.4
+
+Now your application simply connects to
+
+host := "postgres"
+
+instead of
+
+host := "172.18.0.3"
+
+### How does the app know the name?
+We pass it using environment variables.
+
+services:
+
+  app:
+
+    environment:
+
+      DB_HOST: postgres
+
+      REDIS_HOST: redis
+
+
+networks:
+  backend:
+Create a private virtual LAN (Local Area Network) named "backend".
+
+How do services join it?
+
+Example
+
+services:
+
+  app:
+    networks:
+      - backend
+
+  postgres:
+    networks:
+      - backend
+
+  redis:
+    networks:
+      - backend
+
+networks:
+  backend:
+
+Create a private network called backend, and let every service attached to it talk to the others securely.
+Read it like English.
+
+Create a network named backend.
+
+↓
+
+Connect app to backend.
+
+↓
+
+Connect postgres to backend.
+
+↓
+
+Connect redis to backend.
+
+Now imagine the network.
+
+                 backend
+
+          ┌─────────────────────┐
+
+          app
+
+          postgres
+
+          redis
+
+          └─────────────────────┘
+
+
+
+Why do production projects define backend?
+
+Because they often have more than one network.
+
+Example:
+
+Internet
+      │
+      ▼
+    Nginx
+
+──────── frontend network ────────
+
+API
+
+──────── backend network ─────────
+
+PostgreSQL
+
+Redis
+
+
+
+Notice something important.
+
+The database is not exposed to the internet.
+
+Only the API can reach it.
+
+This is a security benefit.
+
+# What happens after a crash?
+
+Server crashes at 3 AM.
+
+Production shouldn't wait for a human.
+so it should start automatically 
+restart: unless-stopped
+
+
+
+```
+What am I deploying?
+
+↓
+
+Go API
+
+↓
+
+Needs PostgreSQL
+
+↓
+
+Needs Redis
+
+↓
+
+Needs persistent storage
+
+↓
+
+Needs networking
+
+↓
+
+Needs restart policy
+
+↓
+
+Now translate those decisions into YAML.
+
+```
