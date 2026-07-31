@@ -32,6 +32,9 @@ func StripeSession(ctx context.Context, userUUID, amount, planName string) (*API
 	}
 	fmt.Println("converted amount--->", convertedAmount)
 
+		//now we need stripe key
+	stripe.Key =
+
 // The shopping cart is ready.
 //
 // Now the cashier has to fill a long billing form before

@@ -59,7 +59,7 @@ func StripeSession(ctx context.Context, userUUID, amount, planName string) (*API
 	fmt.Println("converted amount--->", ConvertedAmount)
 
 	//now we need stripe key
-	stripe.Key = gasgadfghar
+	stripe.Key =
 
 	// ab hum stripe session create karenge
 	//Session mein jo required information hai like price,id,etc
