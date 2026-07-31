@@ -33,19 +33,20 @@
    │     └── Automatic Tax
    │
    └── Business
-         ├── Invoice
-         ├── Tax ID
-         ├── Shipping
-         └── Custom Fields
-*/
-convertedAmount, err := ConvertToCents(amount, "USD")//converting the amount to cents
-	if err != nil {
-		return nil, fmt.Errorf("Failed to convert amount to cents: %v", err)
-	}
-	fmt.Println("converted amount--->", convertedAmount)
 
-	//now we need stripe key before creating the checkout session
-	stripe.Key =
+   	├── Invoice
+   	├── Tax ID
+   	├── Shipping
+   	└── Custom Fields
+*/
+convertedAmount, err := ConvertToCents(amount, "USD") //converting the amount to cents
+if err != nil {
+	return nil, fmt.Errorf("Failed to convert amount to cents: %v", err)
+}
+fmt.Println("converted amount--->", convertedAmount)
+
+//now we need stripe key before creating the checkout session
+stripe.Key = os.Getenv("STRIPE_SECRET_KEY")
 
 params := &stripe.CheckoutSessionParams{
 

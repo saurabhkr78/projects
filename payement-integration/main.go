@@ -4,12 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
-	"net/http"
-	"time"
-
 	"github.com/stripe/stripe-go/v74"
 	"github.com/stripe/stripe-go/v74/checkout/session"
+	"log"
+	"net/http"
+	"os"
+	"time"
 )
 
 // in order to make a payment request, we need to define a struct that will hold the necessary information for the payment. This struct will be used to serialize the payment request data into JSON format when sending it to the payment gateway API
@@ -59,7 +59,7 @@ func StripeSession(ctx context.Context, userUUID, amount, planName string) (*API
 	fmt.Println("converted amount--->", ConvertedAmount)
 
 	//now we need stripe key
-	stripe.Key =
+	stripe.Key = os.Getenv("STRIPE_SECRET_KEY")
 
 	// ab hum stripe session create karenge
 	//Session mein jo required information hai like price,id,etc

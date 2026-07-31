@@ -33,7 +33,7 @@ func StripeSession(ctx context.Context, userUUID, amount, planName string) (*API
 	fmt.Println("converted amount--->", convertedAmount)
 
 		//now we need stripe key
-	stripe.Key =
+	stripe.Key = os.Getenv("STRIPE_SECRET_KEY")
 
 // The shopping cart is ready.
 //
