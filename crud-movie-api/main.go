@@ -11,6 +11,7 @@ import (
 	"github.com/gorilla/mux"
 )
 
+
 type movie struct {
 	ID       *string   `json:"id"`
 	Title    *string   `json:"title"`
@@ -40,7 +41,7 @@ func getMovie(w http.ResponseWriter, r *http.Request) {
 
 			w.Header().Set("Content-Type", "application/json")
 
-			if err := json.NewEncoder(w).Encode(movie); err != nil {
+			if err := json.NewEncoder(w).Encode(movie); err != nil { //test
 				http.Error(w, "failed to encode response", http.StatusInternalServerError)
 			}
 
@@ -51,7 +52,7 @@ func getMovie(w http.ResponseWriter, r *http.Request) {
 	http.Error(w, "movie not found ", http.StatusNotFound)
 }
 func createMovie(w http.ResponseWriter, r *http.Request) {
-	//create a new movie variable where the data just read from the request body will be stored
+	//create a new movie variable where the data just read from the request body will be stored and 
 	var newMovie movie
 	if err := json.NewDecoder(r.Body).Decode(&newMovie); err != nil {
 		http.Error(w, "failed to decode req body", http.StatusBadRequest)
@@ -82,7 +83,7 @@ func updateMovie(w http.ResponseWriter, r *http.Request) {
 
 	params := mux.Vars(r)
 	id := params["id"]
-
+	//this is a variable
 	var updatedMovie movie
 
 	if err := json.NewDecoder(r.Body).Decode(&updatedMovie); err != nil {
