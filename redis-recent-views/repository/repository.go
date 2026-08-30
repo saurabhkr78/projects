@@ -1,11 +1,28 @@
 package repository
 
-import "context"
+import (
+	"context"
+
+	"github.com/saurabhkr78/redis-recent-views/db"
+)
 
 type ProductRepository interface {
-	GetProductById(ctx context.Contextm, ProductID string)
+	GetProductByID(
+		ctx context.Context,
+		productID string,
+	) (*db.Product, error)
 }
-type RecenetViewRepository interface {
-	GetRecentViewed(ctx context.Context, userID string, limit int)
-	SetRecentViewed(ctx context.Context, userID, productID string)
+
+type RecentViewRepository interface {
+	GetRecentViews(
+		ctx context.Context,
+		userID string,
+		limit int,
+	) ([]string, error)
+
+	AddRecentView(
+		ctx context.Context,
+		userID string,
+		productID string,
+	) error
 }

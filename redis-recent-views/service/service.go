@@ -2,15 +2,29 @@ package service
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/saurabhkr78/redis-recent-views/db"
 	"github.com/saurabhkr78/redis-recent-views/repository"
 )
 
 type ProductService interface {
-	GetProduct(ctx context.Context, productID int) (*db.Product, error)
-	GetRecentViews(ctx context.Context, userID string, limit int) ([]string, error)
-	SetRecentView(ctx context.Context, userID, productID string) error
+	GetProduct(
+		ctx context.Context,
+		productID string,
+	) (*db.Product, error)
+
+	GetRecentViews(
+		ctx context.Context,
+		userID string,
+		limit int,
+	) ([]string, error)
+
+	SetRecentView(
+		ctx context.Context,
+		userID string,
+		productID string,
+	) error
 }
 
 type productService struct {
@@ -30,11 +44,21 @@ func NewProductService(
 
 func (s *productService) GetProduct(
 	ctx context.Context,
-	productID int,
+	productID string,
 ) (*db.Product, error) {
-	// TODO:
-	// call productRepo.GetProductByID()
-	return nil, nil
+
+	product, err := s.productRepo.GetProductByID(
+		ctx,
+		productID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf(
+			"failed to get product: %w",
+			err,
+		)
+	}
+
+	return product, nil
 }
 
 func (s *productService) GetRecentViews(
@@ -42,9 +66,24 @@ func (s *productService) GetRecentViews(
 	userID string,
 	limit int,
 ) ([]string, error) {
-	// TODO:
-	// call recentViewRepo.GetRecentViews()
-	return nil, nil
+
+	if limit <= 0 {
+		return []string{}, nil
+	}
+
+	productIDs, err := s.recentViewRepo.GetRecentViews(
+		ctx,
+		userID,
+		limit,
+	)
+	if err != nil {
+		return nil, fmt.Errorf(
+			"failed to get recent views: %w",
+			err,
+		)
+	}
+
+	return productIDs, nil
 }
 
 func (s *productService) SetRecentView(
@@ -52,7 +91,17 @@ func (s *productService) SetRecentView(
 	userID string,
 	productID string,
 ) error {
-	// TODO:
-	// call recentViewRepo.AddRecentView()
+
+	if err := s.recentViewRepo.AddRecentView(
+		ctx,
+		userID,
+		productID,
+	); err != nil {
+		return fmt.Errorf(
+			"failed to set recent view: %w",
+			err,
+		)
+	}
+
 	return nil
 }

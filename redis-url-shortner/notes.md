@@ -86,7 +86,7 @@ So URL shortener would teach you something your counter/rate-limiter/OTP project
 
 Redis can act as a high-speed cache in front of persistent storage.
 
-# so in our projec the flow is
+# so in our projec the flow for get id handler
 GET /aB92x
      │
      ▼
@@ -111,19 +111,6 @@ Redis GET("aB92x")
 
 # you can hide the actual Redis library from your service by defining the methods in client itself which is  going to be used in service layer after dependency injection e.g
 
-Add:
-
-func (c *Client) Get(
-	ctx context.Context,
-	key string,
-) (string, error) {
-	return c.RedisClient.Get(ctx, key).Result()
-}
-
-func (c *Client) Set(
-	ctx context.Context,
-	key string,
-	value string,
-) error {
-	return c.RedisClient.Set(ctx, key, value, 0).Err()
-}
+## so our plan is to implement redis for 
+1.get wallet/me from redis if not then db query
+2.always initiate on transfer balance increase or decrease we must delete the cache key(cache invalidation) in redis so next balance returns from db

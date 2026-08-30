@@ -11,7 +11,9 @@ type FakeProductRepository struct {
 	products []db.Product
 }
 
-func NewFakeProductRepository(products []db.Product) ProductRepository {
+func NewFakeProductRepository(
+	products []db.Product,
+) ProductRepository {
 	return &FakeProductRepository{
 		products: products,
 	}
@@ -19,7 +21,14 @@ func NewFakeProductRepository(products []db.Product) ProductRepository {
 
 func (r *FakeProductRepository) GetProductByID(
 	ctx context.Context,
-	productID int,
+	productID string,
 ) (*db.Product, error) {
 
+	for i := range r.products {
+		if r.products[i].ID == productID {
+			return &r.products[i], nil
+		}
+	}
+
+	return nil, errors.New("product not found")
 }

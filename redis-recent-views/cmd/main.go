@@ -3,9 +3,10 @@ package main
 import (
 	"context"
 	"log"
-	"net/http"
 
+	"github.com/gofiber/fiber/v2"
 	"github.com/redis/go-redis/v9"
+
 	"github.com/saurabhkr78/redis-recent-views/db"
 	"github.com/saurabhkr78/redis-recent-views/handler"
 	"github.com/saurabhkr78/redis-recent-views/repository"
@@ -32,7 +33,9 @@ func main() {
 	// -------------------------
 	// Repositories
 	// -------------------------
-	productRepo := repository.NewProductRepository(products)
+	productRepo := repository.NewFakeProductRepository(
+		products,
+	)
 
 	recentViewRepo := repository.NewRedisRecentViewRepository(
 		redisClient,
@@ -52,25 +55,38 @@ func main() {
 	h := handler.NewHandler(productService)
 
 	// -------------------------
-	// Router
+	// Fiber App
 	// -------------------------
-	mux := http.NewServeMux()
-
-	mux.HandleFunc("/products/", h.GetProduct)
-	mux.HandleFunc("/users/recently-viewed", h.GetRecentViews)
-	mux.HandleFunc("/users/recently-viewed/add", h.SetRecentView)
+	app := fiber.New()
 
 	// -------------------------
-	// Server
+	// Routes
 	// -------------------------
-	server := &http.Server{
-		Addr:    ":8080",
-		Handler: mux,
-	}
 
+	// Get product.
+	app.Get(
+		"/products/:productID",
+		h.GetProduct,
+	)
+
+	// Get recently viewed products.
+	app.Get(
+		"/users/:userID/recently-viewed",
+		h.GetRecentViews,
+	)
+
+	// Add product to recently viewed.
+	app.Post(
+		"/users/:userID/recently-viewed/:productID",
+		h.SetRecentView,
+	)
+
+	// -------------------------
+	// Start server
+	// -------------------------
 	log.Println("server running on :8080")
 
-	if err := server.ListenAndServe(); err != nil {
+	if err := app.Listen(":8080"); err != nil {
 		log.Fatal(err)
 	}
 }
